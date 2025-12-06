@@ -9,25 +9,9 @@ namespace eduHub.Application.Interfaces.Reservations
 
         Task<ReservationResponseDto?> GetByIdAsync(int id);
 
-        Task<PagedResult<ReservationResponseDto>> GetByRoomIdPagedAsync(
-            int roomId,
-            int page,
-            int pageSize);
-
         Task<PagedResult<ReservationResponseDto>> SearchAsync(
-            int? buildingId,
-            int? roomId,
-            DateTime? startTimeUtc,
-            DateTime? endTimeUtc,
-            int page,
-            int pageSize);
-
-        Task<List<ReservationResponseDto>> GetByRoomAsync(int roomId);
-
-        Task<PagedResult<ReservationResponseDto>> GetMyReservationsAsync(
-            int currentUserId,
-            int page,
-            int pageSize);
+            ReservationQueryParameters query,
+            int? currentUserId = null);
 
 
         // ------- WRITE (Ownership-aware) --------

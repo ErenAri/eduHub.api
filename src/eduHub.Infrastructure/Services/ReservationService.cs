@@ -26,45 +26,12 @@ namespace eduHub.Infrastructure.Services
             return reservation == null ? null : MapToDto(reservation);
         }
 
-        public async Task<PagedResult<ReservationResponseDto>> GetByRoomIdPagedAsync(
-            int roomId,
-            int page,
-            int pageSize)
-        {
-            if (page < 1) page = 1;
-            if (pageSize < 1) pageSize = 10;
-
-            var query = _context.Reservations
-                .AsNoTracking()
-                .Where(r => r.RoomId == roomId)
-                .OrderBy(r => r.StartTimeUtc);
-
-            var totalCount = await query.CountAsync();
-
-            var items = await query
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToListAsync();
-
-            return new PagedResult<ReservationResponseDto>
-            {
-                Items = items.Select(MapToDto).ToList(),
-                TotalCount = totalCount,
-                Page = page,
-                PageSize = pageSize
-            };
-        }
-
         public async Task<PagedResult<ReservationResponseDto>> SearchAsync(
-            int? buildingId,
-            int? roomId,
-            DateTime? startTimeUtc,
-            DateTime? endTimeUtc,
-            int page,
-            int pageSize)
+            ReservationQueryParameters queryParams,
+            int? currentUserId = null)
         {
-            if (page < 1) page = 1;
-            if (pageSize < 1) pageSize = 10;
+            var page = queryParams.Page < 1 ? 1 : queryParams.Page;
+            var pageSize = queryParams.PageSize < 1 ? 10 : queryParams.PageSize;
 
             var query = _context.Reservations
                 .AsNoTracking()
@@ -72,19 +39,26 @@ namespace eduHub.Infrastructure.Services
                 .ThenInclude(r => r.Building)
                 .AsQueryable();
 
-            if (roomId.HasValue)
-                query = query.Where(r => r.RoomId == roomId.Value);
+            if (queryParams.RoomId.HasValue)
+                query = query.Where(r => r.RoomId == queryParams.RoomId.Value);
 
-            if (buildingId.HasValue)
-                query = query.Where(r => r.Room != null && r.Room.BuildingId == buildingId.Value);
+            if (queryParams.BuildingId.HasValue)
+                query = query.Where(r => r.Room != null && r.Room.BuildingId == queryParams.BuildingId.Value);
 
-            if (startTimeUtc.HasValue)
-                query = query.Where(r => r.EndTimeUtc >= startTimeUtc.Value);
+            if (queryParams.StartTimeUtc.HasValue)
+                query = query.Where(r => r.EndTimeUtc >= queryParams.StartTimeUtc.Value);
 
-            if (endTimeUtc.HasValue)
-                query = query.Where(r => r.StartTimeUtc <= endTimeUtc.Value);
+            if (queryParams.EndTimeUtc.HasValue)
+                query = query.Where(r => r.StartTimeUtc <= queryParams.EndTimeUtc.Value);
 
-            query = query.OrderBy(r => r.StartTimeUtc);
+            if (currentUserId.HasValue)
+                query = query.Where(r => r.CreatedByUserId == currentUserId.Value);
+
+            var sort = queryParams.Sort?.ToLowerInvariant();
+            var isDesc = sort == "start_desc";
+            query = isDesc
+                ? query.OrderByDescending(r => r.StartTimeUtc).ThenByDescending(r => r.Id)
+                : query.OrderBy(r => r.StartTimeUtc).ThenBy(r => r.Id);
 
             var totalCount = await query.CountAsync();
 
@@ -100,17 +74,6 @@ namespace eduHub.Infrastructure.Services
                 Page = page,
                 PageSize = pageSize
             };
-        }
-
-        public async Task<List<ReservationResponseDto>> GetByRoomAsync(int roomId)
-        {
-            var reservations = await _context.Reservations
-                .AsNoTracking()
-                .Where(r => r.RoomId == roomId)
-                .OrderBy(r => r.StartTimeUtc)
-                .ToListAsync();
-
-            return reservations.Select(MapToDto).ToList();
         }
 
         public async Task<ReservationResponseDto> CreateAsync(
@@ -180,35 +143,6 @@ namespace eduHub.Infrastructure.Services
             await _context.SaveChangesAsync();
 
             return true;
-        }
-
-        public async Task<PagedResult<ReservationResponseDto>> GetMyReservationsAsync(
-            int currentUserId,
-            int page,
-            int pageSize)
-        {
-            if (page < 1) page = 1;
-            if (pageSize < 1) pageSize = 10;
-
-            var query = _context.Reservations
-                .AsNoTracking()
-                .Where(r => r.CreatedByUserId == currentUserId)
-                .OrderBy(r => r.StartTimeUtc);
-
-            var totalCount = await query.CountAsync();
-
-            var items = await query
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToListAsync();
-
-            return new PagedResult<ReservationResponseDto>
-            {
-                Items = items.Select(MapToDto).ToList(),
-                TotalCount = totalCount,
-                Page = page,
-                PageSize = pageSize
-            };
         }
 
         private async Task EnsureNoConflicts(

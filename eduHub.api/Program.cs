@@ -1,4 +1,5 @@
 using System.Text;
+using eduHub.api.Middleware;
 using eduHub.Infrastructure;
 using eduHub.Infrastructure.Persistence;
 using FluentValidation;
@@ -130,6 +131,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+
+app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 app.UseHttpsRedirection();
 

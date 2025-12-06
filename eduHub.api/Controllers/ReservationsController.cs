@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using eduHub.Application.Common;
 using eduHub.Application.DTOs.Reservations;
 using eduHub.Application.Interfaces.Reservations;
@@ -29,41 +29,55 @@ namespace eduHub.api.Controllers
             return Ok(reservation);
         }
 
-        [HttpGet("room/{roomId:int}")]
-        public async Task<ActionResult<List<ReservationResponseDto>>> GetByRoom(int roomId)
+        [HttpGet("search")]
+        public async Task<ActionResult<PagedResponse<ReservationResponseDto>>> Search(
+            [FromQuery] ReservationQueryParameters query)
         {
-            var reservations = await _reservationService.GetByRoomAsync(roomId);
-            return Ok(reservations);
+            var result = await _reservationService.SearchAsync(query);
+            return Ok(ToResponse(result));
         }
 
-        [HttpGet("room/{roomId:int}/paged")]
-        public async Task<ActionResult<PagedResult<ReservationResponseDto>>> GetByRoomPaged(
+        [HttpGet("mine")]
+        public async Task<ActionResult<PagedResponse<ReservationResponseDto>>> GetMine(
+            [FromQuery] ReservationQueryParameters query)
+        {
+            var userId = GetCurrentUserId();
+            var result = await _reservationService.SearchAsync(query, userId);
+            return Ok(ToResponse(result));
+        }
+
+        [HttpGet("room/{roomId:int}")]
+        public async Task<ActionResult<PagedResponse<ReservationResponseDto>>> GetByRoom(
             int roomId,
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 10)
         {
-            var result = await _reservationService.GetByRoomIdPagedAsync(roomId, page, pageSize);
-            return Ok(result);
+            var query = new ReservationQueryParameters
+            {
+                RoomId = roomId,
+                Page = page,
+                PageSize = pageSize
+            };
+
+            var result = await _reservationService.SearchAsync(query);
+            return Ok(ToResponse(result));
         }
 
-        [HttpGet("search")]
-        public async Task<ActionResult<PagedResult<ReservationResponseDto>>> Search(
-            [FromQuery] int? buildingId,
-            [FromQuery] int? roomId,
-            [FromQuery] DateTime? startTimeUtc,
-            [FromQuery] DateTime? endTimeUtc,
+        [HttpGet("room/{roomId:int}/paged")]
+        public async Task<ActionResult<PagedResponse<ReservationResponseDto>>> GetByRoomPaged(
+            int roomId,
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 10)
         {
-            var result = await _reservationService.SearchAsync(
-                buildingId,
-                roomId,
-                startTimeUtc,
-                endTimeUtc,
-                page,
-                pageSize);
+            var query = new ReservationQueryParameters
+            {
+                RoomId = roomId,
+                Page = page,
+                PageSize = pageSize
+            };
 
-            return Ok(result);
+            var result = await _reservationService.SearchAsync(query);
+            return Ok(ToResponse(result));
         }
 
         [HttpPost]
@@ -99,16 +113,6 @@ namespace eduHub.api.Controllers
             return NoContent();
         }
 
-        [HttpGet("mine")]
-        public async Task<ActionResult<PagedResult<ReservationResponseDto>>> GetMine(
-            [FromQuery] int page = 1,
-            [FromQuery] int pageSize = 10)
-        {
-            var userId = GetCurrentUserId();
-            var result = await _reservationService.GetMyReservationsAsync(userId, page, pageSize);
-            return Ok(result);
-        }
-
         private int GetCurrentUserId()
         {
             var idClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -121,6 +125,18 @@ namespace eduHub.api.Controllers
         private bool IsCurrentUserAdmin()
         {
             return User.IsInRole("Admin");
+        }
+
+        private static PagedResponse<ReservationResponseDto> ToResponse(PagedResult<ReservationResponseDto> result)
+        {
+            return new PagedResponse<ReservationResponseDto>
+            {
+                Items = result.Items,
+                Page = result.Page,
+                PageSize = result.PageSize,
+                TotalCount = result.TotalCount,
+                TotalPages = result.TotalPages
+            };
         }
     }
 }
