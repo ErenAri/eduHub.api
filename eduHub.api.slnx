@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="Directory.Build.props.xml" />
+  </Folder>
+  <Project Path="eduHub.api/eduHub.api.csproj" />
+  <Project Path="src/eduHub.Application/eduHub.Application.csproj" Id="a21ae164-4913-42c9-a1b7-68d2421062b3" />
+  <Project Path="src/eduHub.Domain/eduHub.Domain.csproj" Id="d2cf9f7d-0cde-4c18-b483-cb328d66444b" />
+  <Project Path="src/eduHub.Infrastructure/eduHub.Infrastructure.csproj" Id="55da726c-3372-4e48-b71a-09964d6507f0" />
+</Solution>
