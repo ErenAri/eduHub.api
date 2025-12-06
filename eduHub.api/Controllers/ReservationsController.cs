@@ -99,6 +99,16 @@ namespace eduHub.api.Controllers
             return NoContent();
         }
 
+        [HttpGet("mine")]
+        public async Task<ActionResult<PagedResult<ReservationResponseDto>>> GetMine(
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 10)
+        {
+            var userId = GetCurrentUserId();
+            var result = await _reservationService.GetMyReservationsAsync(userId, page, pageSize);
+            return Ok(result);
+        }
+
         private int GetCurrentUserId()
         {
             var idClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;

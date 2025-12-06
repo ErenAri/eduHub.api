@@ -182,6 +182,35 @@ namespace eduHub.Infrastructure.Services
             return true;
         }
 
+        public async Task<PagedResult<ReservationResponseDto>> GetMyReservationsAsync(
+            int currentUserId,
+            int page,
+            int pageSize)
+        {
+            if (page < 1) page = 1;
+            if (pageSize < 1) pageSize = 10;
+
+            var query = _context.Reservations
+                .AsNoTracking()
+                .Where(r => r.CreatedByUserId == currentUserId)
+                .OrderBy(r => r.StartTimeUtc);
+
+            var totalCount = await query.CountAsync();
+
+            var items = await query
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PagedResult<ReservationResponseDto>
+            {
+                Items = items.Select(MapToDto).ToList(),
+                TotalCount = totalCount,
+                Page = page,
+                PageSize = pageSize
+            };
+        }
+
         private async Task EnsureNoConflicts(
             int roomId,
             DateTime startUtc,
