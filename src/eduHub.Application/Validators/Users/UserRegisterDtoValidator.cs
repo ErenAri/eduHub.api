@@ -1,6 +1,7 @@
-﻿using FluentValidation;
+using FluentValidation;
+using eduHub.Application.DTOs.Users;
 
-namespace eduHub.Application.DTOs.Users;
+namespace eduHub.Application.Validators.Users;
 
 public class UserRegisterDtoValidator : AbstractValidator<UserRegisterDto>
 {

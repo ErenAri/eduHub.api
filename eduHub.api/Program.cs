@@ -1,6 +1,6 @@
 using System.Text;
 using eduHub.api.Middleware;
-using eduHub.Application.DTOs.Reservations;
+using eduHub.Application.Validators.Users;
 using eduHub.Infrastructure;
 using eduHub.Infrastructure.Persistence;
 using FluentValidation;
@@ -18,10 +18,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services
     .AddControllers();
 
-builder.Services.AddFluentValidationAutoValidation()
-                .AddFluentValidationClientsideAdapters();
-
-builder.Services.AddValidatorsFromAssemblyContaining<ReservationCreateDtoValidator>();
+builder.Services.AddFluentValidationAutoValidation();
+builder.Services.AddValidatorsFromAssemblyContaining<UserRegisterDtoValidator>();
 
 builder.Services.AddEndpointsApiExplorer();
 
