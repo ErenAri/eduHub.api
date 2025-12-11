@@ -30,5 +30,9 @@ namespace eduHub.Application.Interfaces.Reservations
             int id,
             int currentUserId,
             bool isAdmin);
+
+        Task<ReservationResponseDto> ApproveAsync(int id);
+
+        Task<ReservationResponseDto> RejectAsync(int id);
     }
 }

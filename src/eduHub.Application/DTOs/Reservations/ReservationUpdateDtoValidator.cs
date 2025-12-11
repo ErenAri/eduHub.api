@@ -9,6 +9,9 @@ public class ReservationUpdateDtoValidator : AbstractValidator<ReservationUpdate
         RuleFor(x => x.Id)
             .GreaterThan(0);
 
+        RuleFor(x => x.RoomId)
+            .GreaterThan(0);
+
         RuleFor(x => x.Purpose)
             .NotEmpty()
             .MaximumLength(500);

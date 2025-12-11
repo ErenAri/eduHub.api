@@ -1,30 +1,54 @@
 ﻿using eduHub.Domain.Entities;
 using eduHub.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 
 namespace eduHub.Infrastructure.Persistence;
 
 public static class DbInitializer
 {
-    public static async Task SeedAsync(AppDbContext context)
+    public static async Task SeedAsync(
+        AppDbContext context,
+        IConfiguration configuration,
+        IHostEnvironment env)
     {
         await context.Database.MigrateAsync();
 
-        await SeedAdminUserAsync(context);
-        await SeedBuildingsAndRoomsAsync(context);
+        var seedAdmin = configuration.GetValue("Seed:Admin:Enabled", false);
+        if (seedAdmin)
+        {
+            var adminPassword = configuration["Seed:Admin:Password"];
+            await SeedAdminUserAsync(context, configuration, adminPassword);
+        }
+
+        var seedSampleData = configuration.GetValue("Seed:SampleData:Enabled", env.IsDevelopment());
+        if (seedSampleData)
+        {
+            await SeedBuildingsAndRoomsAsync(context);
+        }
     }
 
-    private static async Task SeedAdminUserAsync(AppDbContext context)
+    private static async Task SeedAdminUserAsync(
+        AppDbContext context,
+        IConfiguration configuration,
+        string? adminPassword)
     {
         if (await context.Users.AnyAsync(u => u.Role == UserRole.Admin))
             return;
 
-        var passwordHash = BCrypt.Net.BCrypt.HashPassword("Admin123!");
+        if (string.IsNullOrWhiteSpace(adminPassword))
+            throw new InvalidOperationException("Seed:Admin:Password must be set when seeding the admin user.");
+
+        var userName = configuration["Seed:Admin:UserName"] ?? "admin";
+        var email = configuration["Seed:Admin:Email"] ?? "admin@eduhub.local";
+
+        var passwordHash = BCrypt.Net.BCrypt.HashPassword(adminPassword);
 
         var admin = new User
         {
-            UserName = "admin",
-            Email = "admin@eduhub.local",
+            UserName = userName,
+            Email = email,
             PasswordHash = passwordHash,
             Role = UserRole.Admin,
             CreatedAtUtc = DateTime.UtcNow

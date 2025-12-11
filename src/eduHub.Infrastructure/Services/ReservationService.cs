@@ -114,8 +114,15 @@ namespace eduHub.Infrastructure.Services
             if (!isAdmin && reservation.CreatedByUserId != currentUserId)
                 throw new UnauthorizedAccessException("You are not allowed to modify this reservation.");
 
-            await EnsureNoConflicts(reservation.RoomId, dto.StartTimeUtc, dto.EndTimeUtc, reservation.Id);
+            var targetRoomId = dto.RoomId;
 
+            var roomExists = await _context.Rooms.AnyAsync(r => r.Id == targetRoomId);
+            if (!roomExists)
+                throw new InvalidOperationException("Room does not exist.");
+
+            await EnsureNoConflicts(targetRoomId, dto.StartTimeUtc, dto.EndTimeUtc, reservation.Id);
+
+            reservation.RoomId = targetRoomId;
             reservation.StartTimeUtc = dto.StartTimeUtc;
             reservation.EndTimeUtc = dto.EndTimeUtc;
             reservation.Purpose = dto.Purpose;
@@ -143,6 +150,46 @@ namespace eduHub.Infrastructure.Services
             await _context.SaveChangesAsync();
 
             return true;
+        }
+
+        public async Task<ReservationResponseDto> ApproveAsync(int id)
+        {
+            var reservation = await _context.Reservations
+                .FirstOrDefaultAsync(r => r.Id == id);
+
+            if (reservation == null)
+                throw new KeyNotFoundException("Reservation not found.");
+
+            if (reservation.Status == ReservationStatus.Approved)
+                return MapToDto(reservation);
+
+            if (reservation.Status != ReservationStatus.Pending)
+                throw new InvalidOperationException("Only pending reservations can be approved.");
+
+            reservation.Status = ReservationStatus.Approved;
+            await _context.SaveChangesAsync();
+
+            return MapToDto(reservation);
+        }
+
+        public async Task<ReservationResponseDto> RejectAsync(int id)
+        {
+            var reservation = await _context.Reservations
+                .FirstOrDefaultAsync(r => r.Id == id);
+
+            if (reservation == null)
+                throw new KeyNotFoundException("Reservation not found.");
+
+            if (reservation.Status == ReservationStatus.Rejected)
+                return MapToDto(reservation);
+
+            if (reservation.Status != ReservationStatus.Pending)
+                throw new InvalidOperationException("Only pending reservations can be rejected.");
+
+            reservation.Status = ReservationStatus.Rejected;
+            await _context.SaveChangesAsync();
+
+            return MapToDto(reservation);
         }
 
         private async Task EnsureNoConflicts(

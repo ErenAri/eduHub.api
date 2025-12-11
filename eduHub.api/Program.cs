@@ -1,5 +1,6 @@
 using System.Text;
 using eduHub.api.Middleware;
+using eduHub.Application.DTOs.Reservations;
 using eduHub.Infrastructure;
 using eduHub.Infrastructure.Persistence;
 using FluentValidation;
@@ -20,7 +21,7 @@ builder.Services
 builder.Services.AddFluentValidationAutoValidation()
                 .AddFluentValidationClientsideAdapters();
 
-builder.Services.AddValidatorsFromAssemblyContaining<object>();
+builder.Services.AddValidatorsFromAssemblyContaining<ReservationCreateDtoValidator>();
 
 builder.Services.AddEndpointsApiExplorer();
 
@@ -74,6 +75,7 @@ builder.Services.AddInfrastructure(builder.Configuration);
 
 var jwtSection = builder.Configuration.GetSection("Jwt");
 string key = jwtSection["Key"] ?? throw new Exception("Jwt:Key is missing");
+
 string issuer = jwtSection["Issuer"] ?? "eduHub";
 string audience = jwtSection["Audience"] ?? "eduHub";
 
@@ -85,7 +87,7 @@ builder.Services
     })
     .AddJwtBearer(options =>
     {
-        options.RequireHttpsMetadata = false;
+        options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
         options.SaveToken = true;
         options.TokenValidationParameters = new TokenValidationParameters
         {
@@ -118,8 +120,16 @@ var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    await DbInitializer.SeedAsync(db);
+    var services = scope.ServiceProvider;
+    var db = services.GetRequiredService<AppDbContext>();
+    var configuration = services.GetRequiredService<IConfiguration>();
+    var env = services.GetRequiredService<IHostEnvironment>();
+
+    var shouldSeed = configuration.GetValue("Seed:Enabled", env.IsDevelopment());
+    if (shouldSeed)
+    {
+        await DbInitializer.SeedAsync(db, configuration, env);
+    }
 }
 
 // =======================================

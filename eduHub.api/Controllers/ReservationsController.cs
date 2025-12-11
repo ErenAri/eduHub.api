@@ -63,23 +63,6 @@ namespace eduHub.api.Controllers
             return Ok(ToResponse(result));
         }
 
-        [HttpGet("room/{roomId:int}/paged")]
-        public async Task<ActionResult<PagedResponse<ReservationResponseDto>>> GetByRoomPaged(
-            int roomId,
-            [FromQuery] int page = 1,
-            [FromQuery] int pageSize = 10)
-        {
-            var query = new ReservationQueryParameters
-            {
-                RoomId = roomId,
-                Page = page,
-                PageSize = pageSize
-            };
-
-            var result = await _reservationService.SearchAsync(query);
-            return Ok(ToResponse(result));
-        }
-
         [HttpPost]
         public async Task<ActionResult<ReservationResponseDto>> Create([FromBody] ReservationCreateDto dto)
         {
@@ -111,6 +94,22 @@ namespace eduHub.api.Controllers
                 return NotFound();
 
             return NoContent();
+        }
+
+        [HttpPost("{id:int}/approve")]
+        [Authorize(Policy = "AdminOnly")]
+        public async Task<ActionResult<ReservationResponseDto>> Approve(int id)
+        {
+            var reservation = await _reservationService.ApproveAsync(id);
+            return Ok(reservation);
+        }
+
+        [HttpPost("{id:int}/reject")]
+        [Authorize(Policy = "AdminOnly")]
+        public async Task<ActionResult<ReservationResponseDto>> Reject(int id)
+        {
+            var reservation = await _reservationService.RejectAsync(id);
+            return Ok(reservation);
         }
 
         private int GetCurrentUserId()

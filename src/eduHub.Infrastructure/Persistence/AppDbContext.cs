@@ -91,7 +91,6 @@ public class AppDbContext : DbContext
                 .HasForeignKey(r => r.CreatedByUserId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
-        base.OnModelCreating(modelBuilder);
 
         modelBuilder.Entity<User>(entity =>
         {

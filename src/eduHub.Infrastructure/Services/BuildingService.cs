@@ -47,6 +47,10 @@ public class BuildingService : IBuildingService
         var entity = await _context.Buildings.FindAsync(id);
         if (entity == null) return false;
 
+        var hasRooms = await _context.Rooms.AnyAsync(r => r.BuildingId == id);
+        if (hasRooms)
+            throw new InvalidOperationException("Cannot delete a building while it still has rooms.");
+
         _context.Buildings.Remove(entity);
         await _context.SaveChangesAsync();
         return true;

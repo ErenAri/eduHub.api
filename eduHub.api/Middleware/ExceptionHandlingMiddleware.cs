@@ -52,11 +52,18 @@ public class ExceptionHandlingMiddleware
                 error.Details = null;
                 break;
 
+            case KeyNotFoundException:
+                statusCode = HttpStatusCode.NotFound;
+                error.Code = "NotFound";
+                error.Message = exception.Message;
+                error.Details = null;
+                break;
+
             default:
                 statusCode = HttpStatusCode.InternalServerError;
                 error.Code = "ServerError";
-                error.Message = exception.Message;
-                error.Details = exception.StackTrace; 
+                error.Message = "An unexpected error occurred.";
+                error.Details = null; 
                 break;
         }
 
