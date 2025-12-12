@@ -1,4 +1,3 @@
-using System.Text;
 using eduHub.api.Middleware;
 using eduHub.Application.Validators.Users;
 using eduHub.Infrastructure;
@@ -6,8 +5,10 @@ using eduHub.Infrastructure.Persistence;
 using FluentValidation;
 using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -113,7 +114,7 @@ builder.Services.AddAuthorization(options =>
 var app = builder.Build();
 
 // =======================================
-// Database Seeding
+// Database Migration + Seeding (OPT-IN)
 // =======================================
 
 using (var scope = app.Services.CreateScope())
@@ -123,10 +124,31 @@ using (var scope = app.Services.CreateScope())
     var configuration = services.GetRequiredService<IConfiguration>();
     var env = services.GetRequiredService<IHostEnvironment>();
 
-    var shouldSeed = configuration.GetValue("Seed:Enabled", env.IsDevelopment());
-    if (shouldSeed)
+    var isProduction = env.IsProduction();
+    var allowDangerousOps =
+        configuration.GetValue("Startup:AllowDangerousOperationsInProduction", false);
+
+    if (isProduction && !allowDangerousOps)
     {
-        await DbInitializer.SeedAsync(db, configuration, env);
+        // NO migrate, NO seed in production by default
+    }
+    else
+    {
+        var autoMigrate =
+            configuration.GetValue("Startup:AutoMigrate", env.IsDevelopment());
+
+        if (autoMigrate)
+        {
+            await db.Database.MigrateAsync();
+        }
+
+        var seedEnabled =
+            configuration.GetValue("Seed:Enabled", env.IsDevelopment());
+
+        if (seedEnabled)
+        {
+            await DbInitializer.SeedAsync(db, configuration, env);
+        }
     }
 }
 

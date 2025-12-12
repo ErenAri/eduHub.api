@@ -22,6 +22,8 @@ public class BuildingsController : ControllerBase
     // GET api/Buildings?page=&pageSize=
     [HttpGet]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+
     public async Task<ActionResult<PagedResponse<BuildingResponseDto>>> GetBuildings(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20)
@@ -48,6 +50,7 @@ public class BuildingsController : ControllerBase
     [HttpGet("{id:int}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<BuildingResponseDto>> GetBuildingById(int id)
     {
         var building = await _buildingService.GetByIdAsync(id);
@@ -67,6 +70,7 @@ public class BuildingsController : ControllerBase
     [HttpPost]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<BuildingResponseDto>> CreateBuilding([FromBody] BuildingCreateDto dto)
     {
         if (!ModelState.IsValid)
@@ -93,6 +97,7 @@ public class BuildingsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<BuildingResponseDto>> UpdateBuilding(int id, [FromBody] BuildingUpdateDto dto)
     {
         if (id != dto.Id)
@@ -122,6 +127,7 @@ public class BuildingsController : ControllerBase
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> DeleteBuilding(int id)
     {
         var building = await _buildingService.GetByIdAsync(id);

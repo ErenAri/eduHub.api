@@ -114,11 +114,15 @@ namespace eduHub.Infrastructure.Services
             if (!isAdmin && reservation.CreatedByUserId != currentUserId)
                 throw new UnauthorizedAccessException("You are not allowed to modify this reservation.");
 
-            var targetRoomId = dto.RoomId;
+            var hasNewRoom = dto.RoomId != default && dto.RoomId != reservation.RoomId;
+            var targetRoomId = hasNewRoom ? dto.RoomId : reservation.RoomId;
 
-            var roomExists = await _context.Rooms.AnyAsync(r => r.Id == targetRoomId);
-            if (!roomExists)
-                throw new InvalidOperationException("Room does not exist.");
+            if (hasNewRoom)
+            {
+                var roomExists = await _context.Rooms.AnyAsync(r => r.Id == targetRoomId);
+                if (!roomExists)
+                    throw new InvalidOperationException("Room does not exist.");
+            }
 
             await EnsureNoConflicts(targetRoomId, dto.StartTimeUtc, dto.EndTimeUtc, reservation.Id);
 

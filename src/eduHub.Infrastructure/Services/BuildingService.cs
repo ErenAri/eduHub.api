@@ -3,6 +3,8 @@ using eduHub.Application.Interfaces.Buildings;
 using eduHub.Domain.Entities;
 using eduHub.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using eduHub.Application.Common.Exceptions;
+
 
 namespace eduHub.Infrastructure.Services;
 
@@ -42,18 +44,21 @@ public class BuildingService : IBuildingService
         return building;
     }
 
-    public async Task<bool> DeleteAsync(int id)
+    public async Task DeleteAsync(int id)
     {
-        var entity = await _context.Buildings.FindAsync(id);
-        if (entity == null) return false;
+        var entity = await _context.Buildings.FirstOrDefaultAsync(b => b.Id == id);
+
+        if (entity == null)
+            throw new KeyNotFoundException("Building not found.");
 
         var hasRooms = await _context.Rooms.AnyAsync(r => r.BuildingId == id);
         if (hasRooms)
-            throw new InvalidOperationException("Cannot delete a building while it still has rooms.");
+            throw new ConflictException(
+                "Cannot delete building because it has rooms. Delete or move rooms first."
+            );
 
         _context.Buildings.Remove(entity);
         await _context.SaveChangesAsync();
-        return true;
     }
     public async Task<PagedResult<Building>> GetPagedAsync(int page, int pageSize)
     {

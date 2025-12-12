@@ -1,6 +1,9 @@
-﻿using System.Net;
+using System.Net;
 using System.Text.Json;
 using eduHub.api.Models;
+using Microsoft.Extensions.Hosting;
+using eduHub.Application.Common.Exceptions;
+
 
 namespace eduHub.api.Middleware;
 
@@ -8,11 +11,16 @@ public class ExceptionHandlingMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<ExceptionHandlingMiddleware> _logger;
+    private readonly IHostEnvironment _environment;
 
-    public ExceptionHandlingMiddleware(RequestDelegate next, ILogger<ExceptionHandlingMiddleware> logger)
+    public ExceptionHandlingMiddleware(
+        RequestDelegate next,
+        ILogger<ExceptionHandlingMiddleware> logger,
+        IHostEnvironment environment)
     {
         _next = next;
         _logger = logger;
+        _environment = environment;
     }
 
     public async Task Invoke(HttpContext context)
@@ -28,7 +36,7 @@ public class ExceptionHandlingMiddleware
         }
     }
 
-    private static async Task HandleExceptionAsync(HttpContext context, Exception exception)
+    private async Task HandleExceptionAsync(HttpContext context, Exception exception)
     {
         var response = context.Response;
         response.ContentType = "application/json";
@@ -38,6 +46,13 @@ public class ExceptionHandlingMiddleware
 
         switch (exception)
         {
+            case ConflictException:
+                statusCode = HttpStatusCode.Conflict;
+                error.Code = "Conflict";
+                error.Message = exception.Message;
+                error.Details = new { traceId = context.TraceIdentifier };
+                break;
+
             case InvalidOperationException:
                 statusCode = HttpStatusCode.BadRequest;
                 error.Code = "InvalidOperation";
@@ -63,7 +78,17 @@ public class ExceptionHandlingMiddleware
                 statusCode = HttpStatusCode.InternalServerError;
                 error.Code = "ServerError";
                 error.Message = "An unexpected error occurred.";
-                error.Details = null; 
+                error.Details = _environment.IsDevelopment()
+                    ? new
+                    {
+                        traceId = context.TraceIdentifier,
+                        error = exception.Message,
+                        stackTrace = exception.StackTrace
+                    }
+                    : new
+                    {
+                        traceId = context.TraceIdentifier
+                    };
                 break;
         }
 

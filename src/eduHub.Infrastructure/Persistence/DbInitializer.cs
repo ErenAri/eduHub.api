@@ -1,4 +1,7 @@
-﻿using eduHub.Domain.Entities;
+﻿using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using eduHub.Domain.Entities;
 using eduHub.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -13,7 +16,9 @@ public static class DbInitializer
         IConfiguration configuration,
         IHostEnvironment env)
     {
-        await context.Database.MigrateAsync();
+        var seedEnabled = configuration.GetValue("Seed:Enabled", env.IsDevelopment());
+        if (!seedEnabled)
+            return;
 
         var seedAdmin = configuration.GetValue("Seed:Admin:Enabled", false);
         if (seedAdmin)
@@ -40,8 +45,20 @@ public static class DbInitializer
         if (string.IsNullOrWhiteSpace(adminPassword))
             throw new InvalidOperationException("Seed:Admin:Password must be set when seeding the admin user.");
 
-        var userName = configuration["Seed:Admin:UserName"] ?? "admin";
-        var email = configuration["Seed:Admin:Email"] ?? "admin@eduhub.local";
+        if (adminPassword.Length < 12 ||
+            string.Equals(adminPassword, "Admin123!", StringComparison.Ordinal) ||
+            string.Equals(adminPassword, "admin", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Seed:Admin:Password does not meet security requirements.");
+        }
+
+        var userName = configuration["Seed:Admin:UserName"];
+        if (string.IsNullOrWhiteSpace(userName))
+            throw new InvalidOperationException("Seed:Admin:UserName must be set when seeding the admin user.");
+
+        var email = configuration["Seed:Admin:Email"];
+        if (string.IsNullOrWhiteSpace(email))
+            throw new InvalidOperationException("Seed:Admin:Email must be set when seeding the admin user.");
 
         var passwordHash = BCrypt.Net.BCrypt.HashPassword(adminPassword);
 
