@@ -170,5 +170,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapGet("/health", () => Results.Ok("ok")).AllowAnonymous();
+
 
 await app.RunAsync();
