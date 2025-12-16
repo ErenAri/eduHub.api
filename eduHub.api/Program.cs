@@ -77,7 +77,9 @@ builder.Services.AddInfrastructure(builder.Configuration);
 // =======================================
 
 var jwtSection = builder.Configuration.GetSection("Jwt");
-var key = jwtSection["Key"] ?? throw new Exception("Jwt:Key is missing");
+var key = jwtSection["Key"];
+if (string.IsNullOrWhiteSpace(key))
+    throw new Exception("Jwt:Key is missing");
 
 var issuer = jwtSection["Issuer"] ?? "eduHub";
 var audience = jwtSection["Audience"] ?? "eduHub";
