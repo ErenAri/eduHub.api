@@ -115,6 +115,12 @@ public class AppDbContext : DbContext
 
             entity.Property(u => u.CreatedAtUtc)
                 .IsRequired();
+
+            entity.HasIndex(u => u.UserName)
+                .IsUnique();
+
+            entity.HasIndex(u => u.Email)
+                .IsUnique();
         });
     }
 }

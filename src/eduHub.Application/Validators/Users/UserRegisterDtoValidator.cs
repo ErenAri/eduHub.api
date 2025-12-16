@@ -19,6 +19,6 @@ public class UserRegisterDtoValidator : AbstractValidator<UserRegisterDto>
 
         RuleFor(x => x.Password)
             .NotEmpty()
-            .MinimumLength(8);
+            .MinimumLength(12);
     }
 }

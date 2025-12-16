@@ -6,6 +6,7 @@ using eduHub.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
+using Npgsql;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -31,7 +32,7 @@ public class UserService : IUserService
             .AnyAsync(u => u.UserName == dto.UserName || u.Email == dto.Email);
 
         if (exists)
-            throw new InvalidOperationException("UserName or Email already exists.");
+            throw new InvalidOperationException("Unable to register.");
 
         var passwordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password);
 
@@ -45,7 +46,14 @@ public class UserService : IUserService
         };
 
         _context.Users.Add(user);
-        await _context.SaveChangesAsync();
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: "23505" })
+        {
+            throw new InvalidOperationException("Unable to register.");
+        }
 
         return new UserResponseDto
         {
@@ -105,7 +113,8 @@ public class UserService : IUserService
         var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key!));
         var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
 
-        expiresAtUtc = DateTime.UtcNow.AddHours(8);
+        var minutes = _configuration.GetValue("Jwt:AccessTokenMinutes", 15);
+        expiresAtUtc = DateTime.UtcNow.AddMinutes(minutes);
 
         var token = new JwtSecurityToken(
             issuer: issuer,

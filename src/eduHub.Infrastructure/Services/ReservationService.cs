@@ -5,6 +5,7 @@ using eduHub.Domain.Entities;
 using eduHub.Domain.Enums;
 using eduHub.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace eduHub.Infrastructure.Services
 {
@@ -31,7 +32,7 @@ namespace eduHub.Infrastructure.Services
             int? currentUserId = null)
         {
             var page = queryParams.Page < 1 ? 1 : queryParams.Page;
-            var pageSize = queryParams.PageSize < 1 ? 10 : queryParams.PageSize;
+            var pageSize = queryParams.PageSize < 1 ? 10 : Math.Min(queryParams.PageSize, 100);
 
             var query = _context.Reservations
                 .AsNoTracking()
@@ -94,7 +95,14 @@ namespace eduHub.Infrastructure.Services
             };
 
             _context.Reservations.Add(reservation);
-            await _context.SaveChangesAsync();
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: "23P01" })
+            {
+                throw new InvalidOperationException("The room is already reserved in the given time range.");
+            }
 
             return MapToDto(reservation);
         }
@@ -131,7 +139,14 @@ namespace eduHub.Infrastructure.Services
             reservation.EndTimeUtc = dto.EndTimeUtc;
             reservation.Purpose = dto.Purpose;
 
-            await _context.SaveChangesAsync();
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: "23P01" })
+            {
+                throw new InvalidOperationException("The room is already reserved in the given time range.");
+            }
 
             return MapToDto(reservation);
         }
@@ -207,7 +222,8 @@ namespace eduHub.Infrastructure.Services
 
             var query = _context.Reservations
                 .AsNoTracking()
-                .Where(r => r.RoomId == roomId);
+                .Where(r => r.RoomId == roomId &&
+                            (r.Status == ReservationStatus.Pending || r.Status == ReservationStatus.Approved));
 
             if (excludeReservationId.HasValue)
                 query = query.Where(r => r.Id != excludeReservationId.Value);

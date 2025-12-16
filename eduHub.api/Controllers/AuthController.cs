@@ -2,6 +2,7 @@
 using eduHub.Application.Interfaces.Users;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace eduHub.api.Controllers;
 
@@ -21,6 +22,7 @@ public class AuthController : ControllerBase
     /// </summary>
     [HttpPost("register")]
     [AllowAnonymous]
+    [EnableRateLimiting("auth")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<UserResponseDto>> Register([FromBody] UserRegisterDto dto)
@@ -33,9 +35,9 @@ public class AuthController : ControllerBase
             var user = await _userService.RegisterAsync(dto);
             return Ok(user);
         }
-        catch (InvalidOperationException ex)
+        catch (InvalidOperationException)
         {
-            return BadRequest(ex.Message);
+            return BadRequest("Unable to register.");
         }
     }
 
@@ -44,6 +46,7 @@ public class AuthController : ControllerBase
     /// </summary>
     [HttpPost("login")]
     [AllowAnonymous]
+    [EnableRateLimiting("auth")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<AuthResponseDto>> Login([FromBody] UserLoginDto dto)

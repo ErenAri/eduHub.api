@@ -61,9 +61,18 @@ public class ExceptionHandlingMiddleware
                 break;
 
             case UnauthorizedAccessException:
-                statusCode = HttpStatusCode.Unauthorized;
-                error.Code = "Unauthorized";
-                error.Message = exception.Message;
+                if (context.User.Identity?.IsAuthenticated == true)
+                {
+                    statusCode = HttpStatusCode.Forbidden;
+                    error.Code = "Forbidden";
+                    error.Message = "Forbidden.";
+                }
+                else
+                {
+                    statusCode = HttpStatusCode.Unauthorized;
+                    error.Code = "Unauthorized";
+                    error.Message = "Unauthorized.";
+                }
                 error.Details = null;
                 break;
 

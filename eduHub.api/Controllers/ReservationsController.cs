@@ -26,10 +26,19 @@ namespace eduHub.api.Controllers
             if (reservation == null)
                 return NotFound();
 
+            var userId = GetCurrentUserId();
+            var isAdmin = IsCurrentUserAdmin();
+            if (!isAdmin && reservation.CreatedByUserId != userId)
+                return Forbid();
+
+            if (!isAdmin)
+                reservation.CreatedByUserId = null;
+
             return Ok(reservation);
         }
 
         [HttpGet("search")]
+        [Authorize(Policy = "AdminOnly")]
         public async Task<ActionResult<PagedResponse<ReservationResponseDto>>> Search(
             [FromQuery] ReservationQueryParameters query)
         {
@@ -47,6 +56,7 @@ namespace eduHub.api.Controllers
         }
 
         [HttpGet("room/{roomId:int}")]
+        [Authorize(Policy = "AdminOnly")]
         public async Task<ActionResult<PagedResponse<ReservationResponseDto>>> GetByRoom(
             int roomId,
             [FromQuery] int page = 1,
