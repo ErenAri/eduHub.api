@@ -156,7 +156,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
         if (!IPAddress.TryParse(parts[0], out var prefix) || !int.TryParse(parts[1], out var prefixLength))
             continue;
 
-        options.KnownNetworks.Add(new IPNetwork(prefix, prefixLength));
+        options.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(prefix, prefixLength));
     }
 });
 
