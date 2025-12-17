@@ -49,14 +49,18 @@ public class ExceptionHandlingMiddleware
             case ConflictException:
                 statusCode = HttpStatusCode.Conflict;
                 error.Code = "Conflict";
-                error.Message = exception.Message;
+                error.Message = _environment.IsDevelopment()
+                    ? exception.Message
+                    : "Request could not be completed.";
                 error.Details = new { traceId = context.TraceIdentifier };
                 break;
 
             case InvalidOperationException:
                 statusCode = HttpStatusCode.BadRequest;
                 error.Code = "InvalidOperation";
-                error.Message = exception.Message;
+                error.Message = _environment.IsDevelopment()
+                    ? exception.Message
+                    : "Invalid request.";
                 error.Details = null;
                 break;
 
@@ -79,7 +83,7 @@ public class ExceptionHandlingMiddleware
             case KeyNotFoundException:
                 statusCode = HttpStatusCode.NotFound;
                 error.Code = "NotFound";
-                error.Message = exception.Message;
+                error.Message = "Not found.";
                 error.Details = null;
                 break;
 

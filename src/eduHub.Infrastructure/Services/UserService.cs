@@ -18,6 +18,7 @@ public class UserService : IUserService
 {
     private readonly AppDbContext _context;
     private readonly IConfiguration _configuration;
+    private static readonly string DummyPasswordHash = BCrypt.Net.BCrypt.HashPassword("eduHub-dummy-password");
 
     public UserService(AppDbContext context, IConfiguration configuration)
     {
@@ -72,7 +73,10 @@ public class UserService : IUserService
                 u.Email == dto.UserNameOrEmail);
 
         if (user == null)
+        {
+            _ = BCrypt.Net.BCrypt.Verify(dto.Password, DummyPasswordHash);
             return null;
+        }
 
         var valid = BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash);
         if (!valid)
@@ -98,22 +102,35 @@ public class UserService : IUserService
     {
         var jwtSection = _configuration.GetSection("Jwt");
         var key = jwtSection["Key"];
+        if (string.IsNullOrWhiteSpace(key))
+            throw new InvalidOperationException("Jwt:Key is missing.");
+        if (Encoding.UTF8.GetByteCount(key) < 32)
+            throw new InvalidOperationException("Jwt:Key must be at least 32 bytes (256-bit).");
+
         var issuer = jwtSection["Issuer"];
+        if (string.IsNullOrWhiteSpace(issuer))
+            issuer = "eduHub";
+
         var audience = jwtSection["Audience"];
+        if (string.IsNullOrWhiteSpace(audience))
+            audience = "eduHub";
 
         var claims = new List<Claim>
         {
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
             new(JwtRegisteredClaimNames.UniqueName, user.UserName),
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(ClaimTypes.Name, user.UserName),
             new(ClaimTypes.Role, user.Role.ToString())
         };
 
-        var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key!));
+        var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
         var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
 
         var minutes = _configuration.GetValue("Jwt:AccessTokenMinutes", 15);
+        if (minutes < 5 || minutes > 60)
+            throw new InvalidOperationException("Jwt:AccessTokenMinutes must be between 5 and 60.");
         expiresAtUtc = DateTime.UtcNow.AddMinutes(minutes);
 
         var token = new JwtSecurityToken(

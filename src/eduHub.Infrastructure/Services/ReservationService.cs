@@ -18,19 +18,31 @@ namespace eduHub.Infrastructure.Services
             _context = context;
         }
 
-        public async Task<ReservationResponseDto?> GetByIdAsync(int id)
+        public async Task<ReservationResponseDto?> GetByIdAsync(int id, int currentUserId, bool isAdmin)
         {
-            var reservation = await _context.Reservations
-                .AsNoTracking()
-                .FirstOrDefaultAsync(r => r.Id == id);
+            var query = _context.Reservations.AsNoTracking().Where(r => r.Id == id);
+            if (!isAdmin)
+                query = query.Where(r => r.CreatedByUserId == currentUserId);
 
-            return reservation == null ? null : MapToDto(reservation);
+            var reservation = await query.FirstOrDefaultAsync();
+            if (reservation == null)
+                return null;
+
+            var dto = MapToDto(reservation);
+            if (!isAdmin)
+                dto.CreatedByUserId = null;
+
+            return dto;
         }
 
         public async Task<PagedResult<ReservationResponseDto>> SearchAsync(
             ReservationQueryParameters queryParams,
-            int? currentUserId = null)
+            int? currentUserId,
+            bool isAdmin)
         {
+            if (!isAdmin && !currentUserId.HasValue)
+                throw new UnauthorizedAccessException("Admin access required.");
+
             var page = queryParams.Page < 1 ? 1 : queryParams.Page;
             var pageSize = queryParams.PageSize < 1 ? 10 : Math.Min(queryParams.PageSize, 100);
 
@@ -52,7 +64,7 @@ namespace eduHub.Infrastructure.Services
             if (queryParams.EndTimeUtc.HasValue)
                 query = query.Where(r => r.StartTimeUtc <= queryParams.EndTimeUtc.Value);
 
-            if (currentUserId.HasValue)
+            if (!isAdmin && currentUserId.HasValue)
                 query = query.Where(r => r.CreatedByUserId == currentUserId.Value);
 
             var sort = queryParams.Sort?.ToLowerInvariant();
@@ -113,14 +125,11 @@ namespace eduHub.Infrastructure.Services
             int currentUserId,
             bool isAdmin)
         {
-            var reservation = await _context.Reservations
-                .FirstOrDefaultAsync(r => r.Id == id);
+            var reservation = await _context.Reservations.FirstOrDefaultAsync(r =>
+                r.Id == id && (isAdmin || r.CreatedByUserId == currentUserId));
 
             if (reservation == null)
                 throw new KeyNotFoundException("Reservation not found.");
-
-            if (!isAdmin && reservation.CreatedByUserId != currentUserId)
-                throw new UnauthorizedAccessException("You are not allowed to modify this reservation.");
 
             var hasNewRoom = dto.RoomId != default && dto.RoomId != reservation.RoomId;
             var targetRoomId = hasNewRoom ? dto.RoomId : reservation.RoomId;
@@ -156,14 +165,11 @@ namespace eduHub.Infrastructure.Services
             int currentUserId,
             bool isAdmin)
         {
-            var reservation = await _context.Reservations
-                .FirstOrDefaultAsync(r => r.Id == id);
+            var reservation = await _context.Reservations.FirstOrDefaultAsync(r =>
+                r.Id == id && (isAdmin || r.CreatedByUserId == currentUserId));
 
             if (reservation == null)
                 return false;
-
-            if (!isAdmin && reservation.CreatedByUserId != currentUserId)
-                throw new UnauthorizedAccessException("You are not allowed to delete this reservation.");
 
             _context.Reservations.Remove(reservation);
             await _context.SaveChangesAsync();
@@ -171,8 +177,10 @@ namespace eduHub.Infrastructure.Services
             return true;
         }
 
-        public async Task<ReservationResponseDto> ApproveAsync(int id)
+        public async Task<ReservationResponseDto> ApproveAsync(int id, bool isAdmin)
         {
+            if (!isAdmin)
+                throw new UnauthorizedAccessException("Forbidden.");
             var reservation = await _context.Reservations
                 .FirstOrDefaultAsync(r => r.Id == id);
 
@@ -191,8 +199,10 @@ namespace eduHub.Infrastructure.Services
             return MapToDto(reservation);
         }
 
-        public async Task<ReservationResponseDto> RejectAsync(int id)
+        public async Task<ReservationResponseDto> RejectAsync(int id, bool isAdmin)
         {
+            if (!isAdmin)
+                throw new UnauthorizedAccessException("Forbidden.");
             var reservation = await _context.Reservations
                 .FirstOrDefaultAsync(r => r.Id == id);
 

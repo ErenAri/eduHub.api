@@ -7,11 +7,12 @@ namespace eduHub.Application.Interfaces.Reservations
     {
         // ------- READ --------
 
-        Task<ReservationResponseDto?> GetByIdAsync(int id);
+        Task<ReservationResponseDto?> GetByIdAsync(int id, int currentUserId, bool isAdmin);
 
         Task<PagedResult<ReservationResponseDto>> SearchAsync(
             ReservationQueryParameters query,
-            int? currentUserId = null);
+            int? currentUserId,
+            bool isAdmin);
 
 
         // ------- WRITE (Ownership-aware) --------
@@ -31,8 +32,8 @@ namespace eduHub.Application.Interfaces.Reservations
             int currentUserId,
             bool isAdmin);
 
-        Task<ReservationResponseDto> ApproveAsync(int id);
+        Task<ReservationResponseDto> ApproveAsync(int id, bool isAdmin);
 
-        Task<ReservationResponseDto> RejectAsync(int id);
+        Task<ReservationResponseDto> RejectAsync(int id, bool isAdmin);
     }
 }

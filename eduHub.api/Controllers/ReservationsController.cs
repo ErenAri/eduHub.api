@@ -22,17 +22,11 @@ namespace eduHub.api.Controllers
         [HttpGet("{id:int}")]
         public async Task<ActionResult<ReservationResponseDto>> GetById(int id)
         {
-            var reservation = await _reservationService.GetByIdAsync(id);
-            if (reservation == null)
-                return NotFound();
-
             var userId = GetCurrentUserId();
             var isAdmin = IsCurrentUserAdmin();
-            if (!isAdmin && reservation.CreatedByUserId != userId)
-                return Forbid();
-
-            if (!isAdmin)
-                reservation.CreatedByUserId = null;
+            var reservation = await _reservationService.GetByIdAsync(id, userId, isAdmin);
+            if (reservation == null)
+                return NotFound();
 
             return Ok(reservation);
         }
@@ -42,7 +36,8 @@ namespace eduHub.api.Controllers
         public async Task<ActionResult<PagedResponse<ReservationResponseDto>>> Search(
             [FromQuery] ReservationQueryParameters query)
         {
-            var result = await _reservationService.SearchAsync(query);
+            var isAdmin = IsCurrentUserAdmin();
+            var result = await _reservationService.SearchAsync(query, currentUserId: null, isAdmin: isAdmin);
             return Ok(ToResponse(result));
         }
 
@@ -51,7 +46,7 @@ namespace eduHub.api.Controllers
             [FromQuery] ReservationQueryParameters query)
         {
             var userId = GetCurrentUserId();
-            var result = await _reservationService.SearchAsync(query, userId);
+            var result = await _reservationService.SearchAsync(query, currentUserId: userId, isAdmin: false);
             return Ok(ToResponse(result));
         }
 
@@ -62,6 +57,7 @@ namespace eduHub.api.Controllers
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 10)
         {
+            var isAdmin = IsCurrentUserAdmin();
             var query = new ReservationQueryParameters
             {
                 RoomId = roomId,
@@ -69,7 +65,7 @@ namespace eduHub.api.Controllers
                 PageSize = pageSize
             };
 
-            var result = await _reservationService.SearchAsync(query);
+            var result = await _reservationService.SearchAsync(query, currentUserId: null, isAdmin: isAdmin);
             return Ok(ToResponse(result));
         }
 
@@ -110,7 +106,8 @@ namespace eduHub.api.Controllers
         [Authorize(Policy = "AdminOnly")]
         public async Task<ActionResult<ReservationResponseDto>> Approve(int id)
         {
-            var reservation = await _reservationService.ApproveAsync(id);
+            var isAdmin = IsCurrentUserAdmin();
+            var reservation = await _reservationService.ApproveAsync(id, isAdmin: isAdmin);
             return Ok(reservation);
         }
 
@@ -118,7 +115,8 @@ namespace eduHub.api.Controllers
         [Authorize(Policy = "AdminOnly")]
         public async Task<ActionResult<ReservationResponseDto>> Reject(int id)
         {
-            var reservation = await _reservationService.RejectAsync(id);
+            var isAdmin = IsCurrentUserAdmin();
+            var reservation = await _reservationService.RejectAsync(id, isAdmin: isAdmin);
             return Ok(reservation);
         }
 
@@ -128,7 +126,10 @@ namespace eduHub.api.Controllers
             if (string.IsNullOrEmpty(idClaim))
                 throw new UnauthorizedAccessException("User id claim is missing.");
 
-            return int.Parse(idClaim);
+            if (!int.TryParse(idClaim, out var userId))
+                throw new UnauthorizedAccessException("User id claim is invalid.");
+
+            return userId;
         }
 
         private bool IsCurrentUserAdmin()
