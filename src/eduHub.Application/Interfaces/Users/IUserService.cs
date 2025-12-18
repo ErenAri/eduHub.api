@@ -8,4 +8,5 @@ public interface IUserService
     Task<AuthResponseDto?> LoginAsync(UserLoginDto dto);
     Task<AuthResponseDto?> RefreshAsync(RefreshRequestDto dto);
     Task RevokeTokenAsync(string jti, DateTimeOffset expiresAtUtc, int userId);
+    Task RevokeRefreshTokensAsync(int userId);
 }

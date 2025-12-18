@@ -1,6 +1,7 @@
 ﻿using eduHub.Application.Common;
 using eduHub.Application.Interfaces.Rooms;
 using eduHub.Domain.Entities;
+using eduHub.Domain.Enums;
 using eduHub.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System;
@@ -68,6 +69,7 @@ public class RoomService : IRoomService
         return await _context.Rooms
             .Where(r => r.BuildingId == buildingId)
             .Where(r => !r.Reservations.Any(res =>
+                (res.Status == ReservationStatus.Pending || res.Status == ReservationStatus.Approved) &&
                 res.StartTimeUtc < endUtc &&
                 res.EndTimeUtc > startUtc))
             .AsNoTracking()
@@ -85,7 +87,7 @@ public class RoomService : IRoomService
         if (CursorSerializer.TryDecode<RoomCursor>(cursor, out var parsed))
         {
             query = query.Where(r =>
-                string.Compare(r.Name, parsed!.Name, StringComparison.Ordinal) > 0 ||
+                string.Compare(r.Name, parsed!.Name) > 0 ||
                 (r.Name == parsed.Name && r.Id > parsed.Id));
         }
 

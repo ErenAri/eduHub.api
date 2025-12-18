@@ -72,7 +72,7 @@ public class BuildingService : IBuildingService
         if (CursorSerializer.TryDecode<BuildingCursor>(cursor, out var parsed))
         {
             query = query.Where(b =>
-                string.Compare(b.Name, parsed!.Name, StringComparison.Ordinal) > 0 ||
+                string.Compare(b.Name, parsed!.Name) > 0 ||
                 (b.Name == parsed.Name && b.Id > parsed.Id));
         }
 

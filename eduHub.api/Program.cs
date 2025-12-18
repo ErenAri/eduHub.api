@@ -224,7 +224,7 @@ builder.Services.AddRateLimiter(options =>
 
     options.AddPolicy("auth", httpContext =>
     {
-        var partitionKey = GetRateLimitPartition(httpContext, allowAnonymous: true);
+        var partitionKey = GetRateLimitPartition(httpContext);
         return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
         {
             Window = TimeSpan.FromMinutes(1),
@@ -236,10 +236,7 @@ builder.Services.AddRateLimiter(options =>
 
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
     {
-        var partitionKey = GetRateLimitPartition(httpContext, allowAnonymous: false);
-        if (partitionKey == null)
-            return RateLimitPartition.GetNoLimiter("anonymous");
-
+        var partitionKey = GetRateLimitPartition(httpContext);
         return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
         {
             Window = TimeSpan.FromMinutes(1),
@@ -255,14 +252,11 @@ static string GetClientIp(HttpContext context)
     return context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 }
 
-static string? GetRateLimitPartition(HttpContext context, bool allowAnonymous)
+static string GetRateLimitPartition(HttpContext context)
 {
     var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
     if (!string.IsNullOrEmpty(userId))
         return $"user:{userId}";
-
-    if (!allowAnonymous)
-        return null;
 
     return $"ip:{GetClientIp(context)}";
 }

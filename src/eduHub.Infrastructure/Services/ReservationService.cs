@@ -132,6 +132,10 @@ namespace eduHub.Infrastructure.Services
             var startUtc = dto.StartTimeUtc.ToUniversalTime();
             var endUtc = dto.EndTimeUtc.ToUniversalTime();
 
+            var roomExists = await _context.Rooms.AnyAsync(r => r.Id == dto.RoomId);
+            if (!roomExists)
+                throw new InvalidOperationException("Room does not exist.");
+
             await EnsureNoConflicts(dto.RoomId, startUtc, endUtc, null);
 
             var reservation = new Reservation
@@ -175,12 +179,9 @@ namespace eduHub.Infrastructure.Services
             var startUtc = dto.StartTimeUtc.ToUniversalTime();
             var endUtc = dto.EndTimeUtc.ToUniversalTime();
 
-            if (hasNewRoom)
-            {
-                var roomExists = await _context.Rooms.AnyAsync(r => r.Id == targetRoomId);
-                if (!roomExists)
-                    throw new InvalidOperationException("Room does not exist.");
-            }
+            var roomExists = await _context.Rooms.AnyAsync(r => r.Id == targetRoomId);
+            if (!roomExists)
+                throw new InvalidOperationException("Room does not exist.");
 
             await EnsureNoConflicts(targetRoomId, startUtc, endUtc, reservation.Id);
 

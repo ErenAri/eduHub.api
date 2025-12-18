@@ -104,6 +104,7 @@ public class AuthController : ControllerBase
             expiresAtUtc = DateTimeOffset.FromUnixTimeSeconds(expSeconds);
 
         await _userService.RevokeTokenAsync(jti, expiresAtUtc, parsedUserId);
+        await _userService.RevokeRefreshTokensAsync(parsedUserId);
         return NoContent();
     }
 }

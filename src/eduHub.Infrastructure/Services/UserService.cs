@@ -137,7 +137,16 @@ public class UserService : IUserService
         var storedToken = await _context.RefreshTokens
             .FirstOrDefaultAsync(rt => rt.TokenHash == refreshHash);
 
-        if (storedToken == null || storedToken.RevokedAtUtc != null || storedToken.ExpiresAtUtc <= now)
+        if (storedToken == null)
+            return null;
+
+        if (storedToken.RevokedAtUtc != null)
+        {
+            await RevokeRefreshTokensAsync(storedToken.UserId, now);
+            return null;
+        }
+
+        if (storedToken.ExpiresAtUtc <= now)
             return null;
 
         var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == storedToken.UserId);
@@ -198,6 +207,26 @@ public class UserService : IUserService
             ExpiresAtUtc = expiresAtUtc,
             RevokedAtUtc = DateTimeOffset.UtcNow
         });
+
+        await _context.SaveChangesAsync();
+    }
+
+    public Task RevokeRefreshTokensAsync(int userId)
+    {
+        return RevokeRefreshTokensAsync(userId, DateTimeOffset.UtcNow);
+    }
+
+    private async Task RevokeRefreshTokensAsync(int userId, DateTimeOffset revokedAtUtc)
+    {
+        var tokens = await _context.RefreshTokens
+            .Where(rt => rt.UserId == userId && rt.RevokedAtUtc == null)
+            .ToListAsync();
+
+        if (tokens.Count == 0)
+            return;
+
+        foreach (var token in tokens)
+            token.RevokedAtUtc = revokedAtUtc;
 
         await _context.SaveChangesAsync();
     }
