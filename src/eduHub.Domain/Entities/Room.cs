@@ -12,6 +12,8 @@ public class Room
 
     public int Capacity { get; set; }
 
+    public bool IsDeleted { get; set; }
+
     public int BuildingId { get; set; }
 
     public Building Building { get; set; } = null!;

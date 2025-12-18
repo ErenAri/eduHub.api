@@ -1,6 +1,7 @@
 ﻿using eduHub.Application.Common;
 using eduHub.Application.DTOs.Buildings;
 using eduHub.Application.Interfaces.Buildings;
+using eduHub.Application.Security;
 using eduHub.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -9,7 +10,7 @@ namespace eduHub.api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Policy = "AdminOnly")]
+[Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
 public class BuildingsController : ControllerBase
 {
     private readonly IBuildingService _buildingService;
@@ -24,18 +25,17 @@ public class BuildingsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
 
-    public async Task<ActionResult<PagedResponse<BuildingResponseDto>>> GetBuildings(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20)
+    public async Task<ActionResult<CursorPageResponse<BuildingResponseDto>>> GetBuildings(
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? cursor = null)
     {
-        var result = await _buildingService.GetPagedAsync(page, pageSize);
+        var result = await _buildingService.GetPagedAsync(pageSize, cursor);
 
-        var response = new PagedResponse<BuildingResponseDto>
+        var response = new CursorPageResponse<BuildingResponseDto>
         {
-            Page = result.Page,
             PageSize = result.PageSize,
-            TotalCount = result.TotalCount,
-            TotalPages = result.TotalPages,
+            NextCursor = result.NextCursor,
+            HasMore = result.HasMore,
             Items = result.Items.Select(b => new BuildingResponseDto
             {
                 Id = b.Id,

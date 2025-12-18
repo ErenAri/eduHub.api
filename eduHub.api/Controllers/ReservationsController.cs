@@ -2,6 +2,7 @@ using System.Security.Claims;
 using eduHub.Application.Common;
 using eduHub.Application.DTOs.Reservations;
 using eduHub.Application.Interfaces.Reservations;
+using eduHub.Application.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -32,8 +33,8 @@ namespace eduHub.api.Controllers
         }
 
         [HttpGet("search")]
-        [Authorize(Policy = "AdminOnly")]
-        public async Task<ActionResult<PagedResponse<ReservationResponseDto>>> Search(
+        [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
+        public async Task<ActionResult<CursorPageResponse<ReservationResponseDto>>> Search(
             [FromQuery] ReservationQueryParameters query)
         {
             var isAdmin = IsCurrentUserAdmin();
@@ -42,7 +43,7 @@ namespace eduHub.api.Controllers
         }
 
         [HttpGet("mine")]
-        public async Task<ActionResult<PagedResponse<ReservationResponseDto>>> GetMine(
+        public async Task<ActionResult<CursorPageResponse<ReservationResponseDto>>> GetMine(
             [FromQuery] ReservationQueryParameters query)
         {
             var userId = GetCurrentUserId();
@@ -51,18 +52,18 @@ namespace eduHub.api.Controllers
         }
 
         [HttpGet("room/{roomId:int}")]
-        [Authorize(Policy = "AdminOnly")]
-        public async Task<ActionResult<PagedResponse<ReservationResponseDto>>> GetByRoom(
+        [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
+        public async Task<ActionResult<CursorPageResponse<ReservationResponseDto>>> GetByRoom(
             int roomId,
-            [FromQuery] int page = 1,
-            [FromQuery] int pageSize = 10)
+            [FromQuery] int pageSize = 10,
+            [FromQuery] string? cursor = null)
         {
             var isAdmin = IsCurrentUserAdmin();
             var query = new ReservationQueryParameters
             {
                 RoomId = roomId,
-                Page = page,
-                PageSize = pageSize
+                PageSize = pageSize,
+                Cursor = cursor
             };
 
             var result = await _reservationService.SearchAsync(query, currentUserId: null, isAdmin: isAdmin);
@@ -103,7 +104,7 @@ namespace eduHub.api.Controllers
         }
 
         [HttpPost("{id:int}/approve")]
-        [Authorize(Policy = "AdminOnly")]
+        [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
         public async Task<ActionResult<ReservationResponseDto>> Approve(int id)
         {
             var isAdmin = IsCurrentUserAdmin();
@@ -112,7 +113,7 @@ namespace eduHub.api.Controllers
         }
 
         [HttpPost("{id:int}/reject")]
-        [Authorize(Policy = "AdminOnly")]
+        [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
         public async Task<ActionResult<ReservationResponseDto>> Reject(int id)
         {
             var isAdmin = IsCurrentUserAdmin();
@@ -134,18 +135,17 @@ namespace eduHub.api.Controllers
 
         private bool IsCurrentUserAdmin()
         {
-            return User.IsInRole("Admin");
+            return User.IsInRole(AuthorizationConstants.Roles.Admin);
         }
 
-        private static PagedResponse<ReservationResponseDto> ToResponse(PagedResult<ReservationResponseDto> result)
+        private static CursorPageResponse<ReservationResponseDto> ToResponse(CursorPageResult<ReservationResponseDto> result)
         {
-            return new PagedResponse<ReservationResponseDto>
+            return new CursorPageResponse<ReservationResponseDto>
             {
                 Items = result.Items,
-                Page = result.Page,
                 PageSize = result.PageSize,
-                TotalCount = result.TotalCount,
-                TotalPages = result.TotalPages
+                NextCursor = result.NextCursor,
+                HasMore = result.HasMore
             };
         }
     }

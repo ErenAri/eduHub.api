@@ -13,6 +13,6 @@ namespace eduHub.Application.Interfaces.Buildings
         Task<Building> CreateAsync(Building building);
         Task<Building> UpdateAsync(Building building);
         Task DeleteAsync(int id);
-        Task<PagedResult<Building>> GetPagedAsync(int page, int pageSize);
+        Task<CursorPageResult<Building>> GetPagedAsync(int pageSize, string? cursor);
     }
 }

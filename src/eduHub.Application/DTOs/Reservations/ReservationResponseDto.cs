@@ -6,9 +6,9 @@
 
         public int RoomId { get; set; }
 
-        public DateTime Start { get; set; }
+        public DateTimeOffset Start { get; set; }
 
-        public DateTime End { get; set; }
+        public DateTimeOffset End { get; set; }
 
         public string Purpose { get; set; } = string.Empty;
 
@@ -16,6 +16,6 @@
 
         public int? CreatedByUserId { get; set; }
 
-        public DateTime CreatedAtUtc { get; set; }
+        public DateTimeOffset CreatedAtUtc { get; set; }
     }
 }

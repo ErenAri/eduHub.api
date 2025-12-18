@@ -3,6 +3,7 @@ using eduHub.Application.Interfaces.Rooms;
 using eduHub.Domain.Entities;
 using eduHub.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using System;
 
 namespace eduHub.Infrastructure.Services;
 
@@ -48,51 +49,77 @@ public class RoomService : IRoomService
 
     public async Task<bool> DeleteAsync(int id)
     {
-        var entity = await _context.Rooms.FindAsync(id);
+        var entity = await _context.Rooms.FirstOrDefaultAsync(r => r.Id == id);
         if (entity == null) return false;
 
-        _context.Rooms.Remove(entity);
+        entity.IsDeleted = true;
         await _context.SaveChangesAsync();
         return true;
     }
 
     public async Task<List<Room>> GetAvailableRoomsAsync(
       int buildingId,
-      DateTime startTimeUtc,
-      DateTime endTimeUtc)
+      DateTimeOffset startTimeUtc,
+      DateTimeOffset endTimeUtc)
     {
+        var startUtc = startTimeUtc.ToUniversalTime();
+        var endUtc = endTimeUtc.ToUniversalTime();
+
         return await _context.Rooms
             .Where(r => r.BuildingId == buildingId)
             .Where(r => !r.Reservations.Any(res =>
-                res.StartTimeUtc < endTimeUtc &&
-                res.EndTimeUtc > startTimeUtc))
+                res.StartTimeUtc < endUtc &&
+                res.EndTimeUtc > startUtc))
             .AsNoTracking()
             .ToListAsync();
     }
-    public async Task<PagedResult<Room>> GetByBuildingIdPagedAsync(int buildingId, int page, int pageSize)
+    public async Task<CursorPageResult<Room>> GetByBuildingIdPagedAsync(int buildingId, int pageSize, string? cursor)
     {
-        if (page < 1) page = 1;
-        if (pageSize < 1) pageSize = 10;
-        if (pageSize > 100) pageSize = 100;
+        pageSize = ClampPageSize(pageSize);
 
         var query = _context.Rooms
             .AsNoTracking()
             .Where(r => r.BuildingId == buildingId)
-            .OrderBy(r => r.Name);
+            .AsQueryable();
 
-        var totalCount = await query.CountAsync();
+        if (CursorSerializer.TryDecode<RoomCursor>(cursor, out var parsed))
+        {
+            query = query.Where(r =>
+                string.Compare(r.Name, parsed!.Name, StringComparison.Ordinal) > 0 ||
+                (r.Name == parsed.Name && r.Id > parsed.Id));
+        }
+
+        query = query
+            .OrderBy(r => r.Name)
+            .ThenBy(r => r.Id);
 
         var items = await query
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
+            .Take(pageSize + 1)
             .ToListAsync();
 
-        return new PagedResult<Room>
+        var hasMore = items.Count > pageSize;
+        if (hasMore)
+            items = items.Take(pageSize).ToList();
+
+        var nextCursor = hasMore
+            ? CursorSerializer.Encode(new RoomCursor(items.Last().Name, items.Last().Id))
+            : null;
+
+        return new CursorPageResult<Room>
         {
             Items = items,
-            Page = page,
             PageSize = pageSize,
-            TotalCount = totalCount
+            NextCursor = nextCursor,
+            HasMore = hasMore
         };
     }
+
+    private static int ClampPageSize(int pageSize)
+    {
+        if (pageSize < 1) return 10;
+        if (pageSize > 100) return 100;
+        return pageSize;
+    }
+
+    private record RoomCursor(string Name, int Id);
 }

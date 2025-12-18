@@ -1,6 +1,7 @@
 ﻿using eduHub.Application.Common;
 using eduHub.Application.DTOs.Rooms;
 using eduHub.Application.Interfaces.Rooms;
+using eduHub.Application.Security;
 using eduHub.Domain.Entities;
 using eduHub.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -10,7 +11,7 @@ namespace eduHub.api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Policy = "AdminOnly")]
+[Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
 public class RoomsController : ControllerBase
 {
     private readonly IRoomService _roomService;
@@ -25,19 +26,18 @@ public class RoomsController : ControllerBase
     /// </summary>
     [HttpGet("by-building/{buildingId:int}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<ActionResult<PagedResponse<RoomResponseDto>>> GetRoomsByBuilding(
+    public async Task<ActionResult<CursorPageResponse<RoomResponseDto>>> GetRoomsByBuilding(
         int buildingId,
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20)
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? cursor = null)
     {
-        var result = await _roomService.GetByBuildingIdPagedAsync(buildingId, page, pageSize);
+        var result = await _roomService.GetByBuildingIdPagedAsync(buildingId, pageSize, cursor);
 
-        var response = new PagedResponse<RoomResponseDto>
+        var response = new CursorPageResponse<RoomResponseDto>
         {
-            Page = result.Page,
             PageSize = result.PageSize,
-            TotalCount = result.TotalCount,
-            TotalPages = result.TotalPages,
+            NextCursor = result.NextCursor,
+            HasMore = result.HasMore,
             Items = result.Items.Select(r => new RoomResponseDto
             {
                 Id = r.Id,
@@ -169,8 +169,8 @@ public class RoomsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<IEnumerable<RoomResponseDto>>> GetAvailableRooms(
         [FromQuery] int buildingId,
-        [FromQuery] DateTime startTimeUtc,
-        [FromQuery] DateTime endTimeUtc)
+        [FromQuery] DateTimeOffset startTimeUtc,
+        [FromQuery] DateTimeOffset endTimeUtc)
     {
         if (buildingId <= 0)
             return BadRequest("buildingId must be greater than 0.");

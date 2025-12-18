@@ -9,7 +9,7 @@ namespace eduHub.Application.Interfaces.Reservations
 
         Task<ReservationResponseDto?> GetByIdAsync(int id, int currentUserId, bool isAdmin);
 
-        Task<PagedResult<ReservationResponseDto>> SearchAsync(
+        Task<CursorPageResult<ReservationResponseDto>> SearchAsync(
             ReservationQueryParameters query,
             int? currentUserId,
             bool isAdmin);

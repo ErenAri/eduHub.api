@@ -1,11 +1,12 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using eduHub.Application.Security;
 
 namespace eduHub.api.Controllers
 {
     [ApiController]
     [Route("[controller]")]
-    [Authorize(Policy = "AdminOnly")]
+    [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
     public class WeatherForecastController : ControllerBase
     {
         private static readonly string[] Summaries =

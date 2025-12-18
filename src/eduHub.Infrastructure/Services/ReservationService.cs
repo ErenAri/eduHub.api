@@ -35,7 +35,7 @@ namespace eduHub.Infrastructure.Services
             return dto;
         }
 
-        public async Task<PagedResult<ReservationResponseDto>> SearchAsync(
+        public async Task<CursorPageResult<ReservationResponseDto>> SearchAsync(
             ReservationQueryParameters queryParams,
             int? currentUserId,
             bool isAdmin)
@@ -43,8 +43,7 @@ namespace eduHub.Infrastructure.Services
             if (!isAdmin && !currentUserId.HasValue)
                 throw new UnauthorizedAccessException("Admin access required.");
 
-            var page = queryParams.Page < 1 ? 1 : queryParams.Page;
-            var pageSize = queryParams.PageSize < 1 ? 10 : Math.Min(queryParams.PageSize, 100);
+            var pageSize = ClampPageSize(queryParams.PageSize);
 
             var query = _context.Reservations
                 .AsNoTracking()
@@ -59,10 +58,16 @@ namespace eduHub.Infrastructure.Services
                 query = query.Where(r => r.Room != null && r.Room.BuildingId == queryParams.BuildingId.Value);
 
             if (queryParams.StartTimeUtc.HasValue)
-                query = query.Where(r => r.EndTimeUtc >= queryParams.StartTimeUtc.Value);
+            {
+                var startUtc = queryParams.StartTimeUtc.Value.ToUniversalTime();
+                query = query.Where(r => r.EndTimeUtc >= startUtc);
+            }
 
             if (queryParams.EndTimeUtc.HasValue)
-                query = query.Where(r => r.StartTimeUtc <= queryParams.EndTimeUtc.Value);
+            {
+                var endUtc = queryParams.EndTimeUtc.Value.ToUniversalTime();
+                query = query.Where(r => r.StartTimeUtc <= endUtc);
+            }
 
             if (!isAdmin && currentUserId.HasValue)
                 query = query.Where(r => r.CreatedByUserId == currentUserId.Value);
@@ -73,19 +78,50 @@ namespace eduHub.Infrastructure.Services
                 ? query.OrderByDescending(r => r.StartTimeUtc).ThenByDescending(r => r.Id)
                 : query.OrderBy(r => r.StartTimeUtc).ThenBy(r => r.Id);
 
-            var totalCount = await query.CountAsync();
+            ReservationCursor? cursor = null;
+            var cursorProvided = !string.IsNullOrWhiteSpace(queryParams.Cursor);
+            if (cursorProvided && !CursorSerializer.TryDecode(queryParams.Cursor, out cursor))
+                throw new InvalidOperationException("Invalid cursor.");
 
-            var items = await query
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
+            if (cursor != null)
+            {
+                if (cursor.IsDescending != isDesc)
+                    throw new InvalidOperationException("Cursor sort does not match requested sort.");
+
+                query = isDesc
+                    ? query.Where(r =>
+                        r.StartTimeUtc < cursor.StartUtc ||
+                        (r.StartTimeUtc == cursor.StartUtc && r.Id < cursor.Id))
+                    : query.Where(r =>
+                        r.StartTimeUtc > cursor.StartUtc ||
+                        (r.StartTimeUtc == cursor.StartUtc && r.Id > cursor.Id));
+            }
+
+            var reservations = await query
+                .Take(pageSize + 1)
                 .ToListAsync();
 
-            return new PagedResult<ReservationResponseDto>
+            var hasMore = reservations.Count > pageSize;
+            if (hasMore)
+                reservations = reservations.Take(pageSize).ToList();
+
+            var nextCursor = hasMore
+                ? CursorSerializer.Encode(new ReservationCursor(reservations.Last().StartTimeUtc, reservations.Last().Id, isDesc))
+                : null;
+
+            var dtos = reservations.Select(MapToDto).ToList();
+            if (!isAdmin)
             {
-                Items = items.Select(MapToDto).ToList(),
-                TotalCount = totalCount,
-                Page = page,
-                PageSize = pageSize
+                foreach (var dto in dtos)
+                    dto.CreatedByUserId = null;
+            }
+
+            return new CursorPageResult<ReservationResponseDto>
+            {
+                Items = dtos,
+                PageSize = pageSize,
+                NextCursor = nextCursor,
+                HasMore = hasMore
             };
         }
 
@@ -93,17 +129,20 @@ namespace eduHub.Infrastructure.Services
             ReservationCreateDto dto,
             int createdByUserId)
         {
-            await EnsureNoConflicts(dto.RoomId, dto.StartTimeUtc, dto.EndTimeUtc, null);
+            var startUtc = dto.StartTimeUtc.ToUniversalTime();
+            var endUtc = dto.EndTimeUtc.ToUniversalTime();
+
+            await EnsureNoConflicts(dto.RoomId, startUtc, endUtc, null);
 
             var reservation = new Reservation
             {
                 RoomId = dto.RoomId,
-                StartTimeUtc = dto.StartTimeUtc,
-                EndTimeUtc = dto.EndTimeUtc,
+                StartTimeUtc = startUtc,
+                EndTimeUtc = endUtc,
                 Purpose = dto.Purpose,
                 Status = ReservationStatus.Pending, // Default status, adjust as needed
                 CreatedByUserId = createdByUserId,
-                CreatedAtUtc = DateTime.UtcNow
+                CreatedAtUtc = DateTimeOffset.UtcNow
             };
 
             _context.Reservations.Add(reservation);
@@ -133,6 +172,8 @@ namespace eduHub.Infrastructure.Services
 
             var hasNewRoom = dto.RoomId != default && dto.RoomId != reservation.RoomId;
             var targetRoomId = hasNewRoom ? dto.RoomId : reservation.RoomId;
+            var startUtc = dto.StartTimeUtc.ToUniversalTime();
+            var endUtc = dto.EndTimeUtc.ToUniversalTime();
 
             if (hasNewRoom)
             {
@@ -141,11 +182,11 @@ namespace eduHub.Infrastructure.Services
                     throw new InvalidOperationException("Room does not exist.");
             }
 
-            await EnsureNoConflicts(targetRoomId, dto.StartTimeUtc, dto.EndTimeUtc, reservation.Id);
+            await EnsureNoConflicts(targetRoomId, startUtc, endUtc, reservation.Id);
 
             reservation.RoomId = targetRoomId;
-            reservation.StartTimeUtc = dto.StartTimeUtc;
-            reservation.EndTimeUtc = dto.EndTimeUtc;
+            reservation.StartTimeUtc = startUtc;
+            reservation.EndTimeUtc = endUtc;
             reservation.Purpose = dto.Purpose;
 
             try
@@ -171,7 +212,7 @@ namespace eduHub.Infrastructure.Services
             if (reservation == null)
                 return false;
 
-            _context.Reservations.Remove(reservation);
+            reservation.IsDeleted = true;
             await _context.SaveChangesAsync();
 
             return true;
@@ -223,8 +264,8 @@ namespace eduHub.Infrastructure.Services
 
         private async Task EnsureNoConflicts(
             int roomId,
-            DateTime startUtc,
-            DateTime endUtc,
+            DateTimeOffset startUtc,
+            DateTimeOffset endUtc,
             int? excludeReservationId)
         {
             if (endUtc <= startUtc)
@@ -246,6 +287,13 @@ namespace eduHub.Infrastructure.Services
                 throw new InvalidOperationException("The room is already reserved in the given time range.");
         }
 
+        private static int ClampPageSize(int pageSize)
+        {
+            if (pageSize < 1) return 10;
+            if (pageSize > 100) return 100;
+            return pageSize;
+        }
+
         private static ReservationResponseDto MapToDto(Reservation reservation)
         {
             return new ReservationResponseDto
@@ -260,5 +308,7 @@ namespace eduHub.Infrastructure.Services
                 CreatedAtUtc = reservation.CreatedAtUtc
             };
         }
+
+        private record ReservationCursor(DateTimeOffset StartUtc, int Id, bool IsDescending);
     }
 }

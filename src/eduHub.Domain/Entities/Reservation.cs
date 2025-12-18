@@ -9,12 +9,14 @@ public class Reservation
     public int RoomId { get; set; }
     public Room Room { get; set; } = null!;
 
-    public DateTime StartTimeUtc { get; set; }
-    public DateTime EndTimeUtc { get; set; }
+    public DateTimeOffset StartTimeUtc { get; set; }
+    public DateTimeOffset EndTimeUtc { get; set; }
     public string Purpose { get; set; } = null!;
     public ReservationStatus Status { get; set; }
 
     public int? CreatedByUserId { get; set; }
     public User? CreatedByUser { get; set; }
-    public DateTime CreatedAtUtc { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+
+    public bool IsDeleted { get; set; }
 }

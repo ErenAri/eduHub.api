@@ -12,10 +12,40 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Net;
+using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 using System.Threading.RateLimiting;
+using System.Security.Claims;
+using eduHub.Application.Security;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var corsPolicyName = "CorsPolicy";
+var allowedCorsOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>() ?? Array.Empty<string>();
+
+if (builder.Environment.IsProduction() && allowedCorsOrigins.Length == 0)
+    throw new InvalidOperationException("Configure Cors:AllowedOrigins for production environments.");
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy(corsPolicyName, policy =>
+    {
+        if (allowedCorsOrigins.Length == 0)
+        {
+            policy.AllowAnyOrigin()
+                  .AllowAnyHeader()
+                  .AllowAnyMethod();
+        }
+        else
+        {
+            policy.WithOrigins(allowedCorsOrigins)
+                  .AllowAnyHeader()
+                  .AllowAnyMethod();
+        }
+    });
+});
 
 // =======================================
 // Controllers + FluentValidation
@@ -112,6 +142,28 @@ builder.Services
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),
             ClockSkew = TimeSpan.Zero
         };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = async context =>
+            {
+                var userIdValue = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+                var jti = context.Principal?.FindFirstValue(JwtRegisteredClaimNames.Jti);
+
+                if (string.IsNullOrWhiteSpace(userIdValue) || string.IsNullOrWhiteSpace(jti) || !int.TryParse(userIdValue, out var userId))
+                {
+                    context.Fail("Invalid token claims.");
+                    return;
+                }
+
+                var db = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
+                var userExists = await db.Users.AnyAsync(u => u.Id == userId);
+                var isRevoked = await db.RevokedTokens.AnyAsync(t => t.Jti == jti);
+
+                if (!userExists || isRevoked)
+                    context.Fail("Token is no longer valid.");
+            }
+        };
     });
 
 // =======================================
@@ -120,7 +172,7 @@ builder.Services
 
 builder.Services.AddAuthorization(options =>
 {
-    options.AddPolicy("AdminOnly", policy => policy.RequireRole("Admin"));
+    options.AddPolicy(AuthorizationConstants.Policies.AdminOnly, policy => policy.RequireRole(AuthorizationConstants.Roles.Admin));
     options.FallbackPolicy = new AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
         .Build();
@@ -172,11 +224,26 @@ builder.Services.AddRateLimiter(options =>
 
     options.AddPolicy("auth", httpContext =>
     {
-        var clientIp = GetClientIp(httpContext);
-        return RateLimitPartition.GetFixedWindowLimiter(clientIp, _ => new FixedWindowRateLimiterOptions
+        var partitionKey = GetRateLimitPartition(httpContext, allowAnonymous: true);
+        return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
         {
             Window = TimeSpan.FromMinutes(1),
             PermitLimit = 5,
+            QueueLimit = 0,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+        });
+    });
+
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+    {
+        var partitionKey = GetRateLimitPartition(httpContext, allowAnonymous: false);
+        if (partitionKey == null)
+            return RateLimitPartition.GetNoLimiter("anonymous");
+
+        return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
+        {
+            Window = TimeSpan.FromMinutes(1),
+            PermitLimit = 60,
             QueueLimit = 0,
             QueueProcessingOrder = QueueProcessingOrder.OldestFirst
         });
@@ -186,6 +253,18 @@ builder.Services.AddRateLimiter(options =>
 static string GetClientIp(HttpContext context)
 {
     return context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+}
+
+static string? GetRateLimitPartition(HttpContext context, bool allowAnonymous)
+{
+    var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    if (!string.IsNullOrEmpty(userId))
+        return $"user:{userId}";
+
+    if (!allowAnonymous)
+        return null;
+
+    return $"ip:{GetClientIp(context)}";
 }
 var app = builder.Build();
 
@@ -243,6 +322,7 @@ else
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 app.UseHttpsRedirection();
+app.UseCors(corsPolicyName);
 
 app.UseRateLimiter();
 
@@ -250,7 +330,17 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
-app.MapGet("/health", () => Results.Ok("ok"))
-   .RequireAuthorization();
+app.MapGet("/health", async (AppDbContext db, CancellationToken ct) =>
+{
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync("SELECT 1", ct);
+        return Results.Ok(new { status = "ok" });
+    }
+    catch
+    {
+        return Results.Problem("Database unavailable", statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+});
 
 app.Run();

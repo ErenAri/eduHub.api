@@ -3,6 +3,7 @@ using System.Text.Json;
 using eduHub.api.Models;
 using Microsoft.Extensions.Hosting;
 using eduHub.Application.Common.Exceptions;
+using System.Security.Claims;
 
 
 namespace eduHub.api.Middleware;
@@ -24,17 +25,19 @@ public class ExceptionHandlingMiddleware
     }
 
     public async Task Invoke(HttpContext context)
-    {
-        try
         {
-            await _next(context);
+            try
+            {
+                await _next(context);
+            }
+            catch (Exception ex)
+            {
+                var userId = context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
+                var path = context.Request.Path.Value ?? string.Empty;
+                _logger.LogError(ex, "Unhandled exception {TraceId} for user {UserId} at {Path}", context.TraceIdentifier, userId, path);
+                await HandleExceptionAsync(context, ex);
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unhandled exception caught by middleware");
-            await HandleExceptionAsync(context, ex);
-        }
-    }
 
     private async Task HandleExceptionAsync(HttpContext context, Exception exception)
     {

@@ -1,5 +1,6 @@
 ﻿using eduHub.Application.Common;
 using eduHub.Application.Interfaces.Buildings;
+using System;
 using eduHub.Domain.Entities;
 using eduHub.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -60,29 +61,52 @@ public class BuildingService : IBuildingService
         _context.Buildings.Remove(entity);
         await _context.SaveChangesAsync();
     }
-    public async Task<PagedResult<Building>> GetPagedAsync(int page, int pageSize)
+    public async Task<CursorPageResult<Building>> GetPagedAsync(int pageSize, string? cursor)
     {
-        if (page < 1) page = 1;
-        if (pageSize < 1) pageSize = 10;
-        if (pageSize > 100) pageSize = 100;
+        pageSize = ClampPageSize(pageSize);
 
         var query = _context.Buildings
             .AsNoTracking()
-            .OrderBy(b => b.Name);
+            .AsQueryable();
 
-        var totalCount = await query.CountAsync();
+        if (CursorSerializer.TryDecode<BuildingCursor>(cursor, out var parsed))
+        {
+            query = query.Where(b =>
+                string.Compare(b.Name, parsed!.Name, StringComparison.Ordinal) > 0 ||
+                (b.Name == parsed.Name && b.Id > parsed.Id));
+        }
+
+        query = query
+            .OrderBy(b => b.Name)
+            .ThenBy(b => b.Id);
 
         var items = await query
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
+            .Take(pageSize + 1)
             .ToListAsync();
 
-        return new PagedResult<Building>
+        var hasMore = items.Count > pageSize;
+        if (hasMore)
+            items = items.Take(pageSize).ToList();
+
+        var nextCursor = hasMore
+            ? CursorSerializer.Encode(new BuildingCursor(items.Last().Name, items.Last().Id))
+            : null;
+
+        return new CursorPageResult<Building>
         {
             Items = items,
-            Page = page,
             PageSize = pageSize,
-            TotalCount = totalCount
+            NextCursor = nextCursor,
+            HasMore = hasMore
         };
     }
+
+    private static int ClampPageSize(int pageSize)
+    {
+        if (pageSize < 1) return 10;
+        if (pageSize > 100) return 100;
+        return pageSize;
+    }
+
+    private record BuildingCursor(string Name, int Id);
 }
