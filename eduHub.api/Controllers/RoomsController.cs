@@ -11,7 +11,7 @@ namespace eduHub.api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
+[Authorize]
 public class RoomsController : ControllerBase
 {
     private readonly IRoomService _roomService;
@@ -79,6 +79,7 @@ public class RoomsController : ControllerBase
     /// Creates a new room.
     /// </summary>
     [HttpPost]
+    [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<RoomResponseDto>> CreateRoom([FromBody] RoomCreateDto dto)
@@ -112,6 +113,7 @@ public class RoomsController : ControllerBase
     /// Updates an existing room.
     /// </summary>
     [HttpPut("{id:int}")]
+    [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -149,6 +151,7 @@ public class RoomsController : ControllerBase
     /// Deletes a room.
     /// </summary>
     [HttpDelete("{id:int}")]
+    [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteRoom(int id)
