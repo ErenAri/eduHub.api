@@ -10,7 +10,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Run Gitleaks (OSS)
-        uses: docker://zricethezav/gitleaks:8.18.2
-        with:
-          args: detect --source . --no-git --verbose
+      - name: Install gitleaks (no Docker)
+        run: |
+          version=8.18.2
+          mkdir -p "$HOME/bin"
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_linux_x64.tar.gz" -o gitleaks.tar.gz
+          tar -xzf gitleaks.tar.gz -C "$HOME/bin" gitleaks
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+      - name: Run gitleaks
+        run: gitleaks detect --source . --no-git --verbose

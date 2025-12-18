@@ -1,0 +1,9 @@
+title = "gitleaks config"
+
+[allowlist]
+  description = "Ignore editor/build artifacts"
+  paths = [
+    '''\.vs/.*''',
+    '''bin/.*''',
+    '''obj/.*'''
+  ]
