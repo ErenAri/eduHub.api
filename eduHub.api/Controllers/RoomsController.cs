@@ -12,7 +12,7 @@ namespace eduHub.api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class RoomsController : ControllerBase
+public class RoomsController : ApiControllerBase
 {
     private readonly IRoomService _roomService;
 
@@ -56,12 +56,12 @@ public class RoomsController : ControllerBase
     /// </summary>
     [HttpGet("{id:int}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<RoomResponseDto>> GetRoomById(int id)
     {
         var room = await _roomService.GetByIdAsync(id);
         if (room == null)
-            return NotFound();
+            return NotFoundProblem();
 
         var response = new RoomResponseDto
         {
@@ -81,12 +81,9 @@ public class RoomsController : ControllerBase
     [HttpPost]
     [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
     [ProducesResponseType(StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<RoomResponseDto>> CreateRoom([FromBody] RoomCreateDto dto)
     {
-        if (!ModelState.IsValid)
-            return BadRequest(ModelState);
-
         var room = new Room
         {
             Code = dto.Code,
@@ -115,19 +112,16 @@ public class RoomsController : ControllerBase
     [HttpPut("{id:int}")]
     [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<RoomResponseDto>> UpdateRoom(int id, [FromBody] RoomUpdateDto dto)
     {
         if (id != dto.Id)
-            return BadRequest("Route id and body id do not match.");
-
-        if (!ModelState.IsValid)
-            return BadRequest(ModelState);
+            return BadRequestProblem("Route id and body id do not match.");
 
         var room = await _roomService.GetByIdAsync(id);
         if (room == null)
-            return NotFound();
+            return NotFoundProblem();
 
         room.Code = dto.Code;
         room.Name = dto.Name;
@@ -153,12 +147,12 @@ public class RoomsController : ControllerBase
     [HttpDelete("{id:int}")]
     [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteRoom(int id)
     {
         var room = await _roomService.GetByIdAsync(id);
         if (room == null)
-            return NotFound();
+            return NotFoundProblem();
 
         await _roomService.DeleteAsync(id);
         return NoContent();
@@ -169,17 +163,17 @@ public class RoomsController : ControllerBase
     /// </summary>
     [HttpGet("available")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<IEnumerable<RoomResponseDto>>> GetAvailableRooms(
         [FromQuery] int buildingId,
         [FromQuery] DateTimeOffset startTimeUtc,
         [FromQuery] DateTimeOffset endTimeUtc)
     {
         if (buildingId <= 0)
-            return BadRequest("buildingId must be greater than 0.");
+            return BadRequestProblem("buildingId must be greater than 0.");
 
         if (startTimeUtc >= endTimeUtc)
-            return BadRequest("startTimeUtc must be earlier than endTimeUtc.");
+            return BadRequestProblem("startTimeUtc must be earlier than endTimeUtc.");
 
         var rooms = await _roomService.GetAvailableRoomsAsync(buildingId, startTimeUtc, endTimeUtc);
 

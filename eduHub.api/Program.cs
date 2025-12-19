@@ -1,4 +1,6 @@
+using eduHub.api.HostedServices;
 using eduHub.api.Middleware;
+using eduHub.api.Options;
 using eduHub.Application.Validators.Users;
 using eduHub.Infrastructure;
 using eduHub.Infrastructure.Persistence;
@@ -6,17 +8,28 @@ using FluentValidation;
 using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using Microsoft.Extensions.Options;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using System.Net;
+using System.Diagnostics;
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
+using System.Text.Json;
 using System.Threading.RateLimiting;
 using System.Security.Claims;
 using eduHub.Application.Security;
+using IPNetwork = System.Net.IPNetwork;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -55,6 +68,25 @@ builder.Services.AddControllers();
 
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<UserRegisterDtoValidator>();
+
+builder.Services.Configure<ApiBehaviorOptions>(options =>
+{
+    options.InvalidModelStateResponseFactory = context =>
+    {
+        var problemDetailsFactory = context.HttpContext.RequestServices.GetRequiredService<ProblemDetailsFactory>();
+        var problemDetails = problemDetailsFactory.CreateValidationProblemDetails(
+            context.HttpContext,
+            context.ModelState);
+        problemDetails.Type = "https://httpstatuses.com/400";
+        problemDetails.Extensions["code"] = "ValidationError";
+        problemDetails.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
+
+        return new BadRequestObjectResult(problemDetails)
+        {
+            ContentTypes = { "application/problem+json" }
+        };
+    };
+});
 
 builder.Services.AddEndpointsApiExplorer();
 
@@ -105,21 +137,21 @@ builder.Services.AddInfrastructure(builder.Configuration);
 // =======================================
 // Authentication / JWT
 // =======================================
-
-var jwtSection = builder.Configuration.GetSection("Jwt");
-var key = jwtSection["Key"];
-if (string.IsNullOrWhiteSpace(key))
-    throw new Exception("Jwt:Key is missing");
-if (Encoding.UTF8.GetByteCount(key) < 32)
-    throw new Exception("Jwt:Key must be at least 32 bytes (256-bit).");
-
-var issuer = jwtSection["Issuer"];
-if (string.IsNullOrWhiteSpace(issuer))
-    issuer = "eduHub";
-
-var audience = jwtSection["Audience"];
-if (string.IsNullOrWhiteSpace(audience))
-    audience = "eduHub";
+builder.Services.AddOptions<JwtOptions>()
+    .Bind(builder.Configuration.GetSection(JwtOptions.SectionName))
+    .Validate(options => !string.IsNullOrWhiteSpace(options.Key),
+        "Jwt:Key is missing.")
+    .Validate(options => Encoding.UTF8.GetByteCount(options.Key) >= 32,
+        "Jwt:Key must be at least 32 bytes (256-bit).")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.Issuer),
+        "Jwt:Issuer is missing.")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.Audience),
+        "Jwt:Audience is missing.")
+    .Validate(options => options.AccessTokenMinutes is >= 5 and <= 60,
+        "Jwt:AccessTokenMinutes must be between 5 and 60.")
+    .Validate(options => options.RefreshTokenDays is >= 1 and <= 90,
+        "Jwt:RefreshTokenDays must be between 1 and 90.")
+    .ValidateOnStart();
 
 builder.Services
     .AddAuthentication(options =>
@@ -127,19 +159,24 @@ builder.Services
         options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
         options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
     })
-    .AddJwtBearer(options =>
+    .AddJwtBearer();
+
+builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+    .Configure<IOptions<JwtOptions>>((options, jwtOptions) =>
     {
-        options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
+        var jwt = jwtOptions.Value;
+
+        options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();    
         options.SaveToken = true;
-        options.TokenValidationParameters = new TokenValidationParameters
+        options.TokenValidationParameters = new TokenValidationParameters       
         {
             ValidateIssuer = true,
-            ValidIssuer = issuer,
+            ValidIssuer = jwt.Issuer,
             ValidateAudience = true,
-            ValidAudience = audience,
+            ValidAudience = jwt.Audience,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.Key)),
             ClockSkew = TimeSpan.Zero
         };
 
@@ -182,7 +219,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
     options.KnownProxies.Clear();
-    options.KnownNetworks.Clear();
+    options.KnownIPNetworks.Clear();
 
     options.KnownProxies.Add(IPAddress.Loopback);
     options.KnownProxies.Add(IPAddress.IPv6Loopback);
@@ -208,14 +245,15 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
         if (!IPAddress.TryParse(parts[0], out var prefix) || !int.TryParse(parts[1], out var prefixLength))
             continue;
 
-        options.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(prefix, prefixLength));
+        options.KnownIPNetworks.Add(new IPNetwork(prefix, prefixLength));
     }
 });
 
 var trustedForwardingConfigured =
     builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").GetChildren().Any() ||
     builder.Configuration.GetSection("ForwardedHeaders:KnownNetworks").GetChildren().Any();
-if (builder.Environment.IsProduction() && !trustedForwardingConfigured)
+var requireKnownProxies = builder.Configuration.GetValue("ForwardedHeaders:RequireKnownProxies", true);
+if (builder.Environment.IsProduction() && requireKnownProxies && !trustedForwardingConfigured)
     throw new InvalidOperationException("Configure ForwardedHeaders:KnownProxies or KnownNetworks for production behind a proxy.");
 
 builder.Services.AddRateLimiter(options =>
@@ -247,6 +285,64 @@ builder.Services.AddRateLimiter(options =>
     });
 });
 
+// =======================================
+// Observability (OpenTelemetry + Health)
+// =======================================
+
+var otelServiceName = builder.Configuration.GetValue<string>("OpenTelemetry:ServiceName")
+    ?? builder.Environment.ApplicationName;
+var otelServiceVersion = typeof(Program).Assembly.GetName().Version?.ToString() ?? "unknown";
+var otlpEndpoint = builder.Configuration.GetValue<string>("OpenTelemetry:Otlp:Endpoint");
+var samplingRatio = builder.Configuration.GetValue("OpenTelemetry:SamplingRatio", 1.0);
+samplingRatio = Math.Clamp(samplingRatio, 0.0, 1.0);
+
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource => resource
+        .AddService(otelServiceName, serviceVersion: otelServiceVersion)
+        .AddAttributes(new[]
+        {
+            new KeyValuePair<string, object>("deployment.environment", builder.Environment.EnvironmentName)
+        }))
+    .WithTracing(tracing =>
+    {
+        tracing
+            .SetSampler(new ParentBasedSampler(new TraceIdRatioBasedSampler(samplingRatio)))
+            .AddAspNetCoreInstrumentation(options => { options.RecordException = true; })
+            .AddHttpClientInstrumentation()
+            .AddEntityFrameworkCoreInstrumentation();
+
+        if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+            tracing.AddOtlpExporter(options => options.Endpoint = new Uri(otlpEndpoint));
+    })
+    .WithMetrics(metrics =>
+    {
+        metrics
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddRuntimeInstrumentation()
+            .AddMeter("Microsoft.AspNetCore.Hosting", "Microsoft.AspNetCore.Server.Kestrel", "System.Net.Http");
+
+        if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+            metrics.AddOtlpExporter(options => options.Endpoint = new Uri(otlpEndpoint));
+    });
+
+builder.Services.AddHealthChecks()
+    .AddCheck("self", () => HealthCheckResult.Healthy(), tags: new[] { "live" })
+    .AddDbContextCheck<AppDbContext>("db", tags: new[] { "ready" });
+
+builder.Services.AddOptions<RequestLoggingOptions>()
+    .Bind(builder.Configuration.GetSection(RequestLoggingOptions.SectionName))
+    .Validate(options => options.SlowRequestThresholdMs >= 100,
+        "RequestLogging:SlowRequestThresholdMs must be at least 100.")
+    .ValidateOnStart();
+
+builder.Services.AddOptions<TokenCleanupOptions>()
+    .Bind(builder.Configuration.GetSection(TokenCleanupOptions.SectionName))
+    .Validate(options => options.IntervalMinutes is >= 5 and <= 1440,
+        "TokenCleanup:IntervalMinutes must be between 5 and 1440.")
+    .ValidateOnStart();
+builder.Services.AddHostedService<TokenCleanupService>();
+
 static string GetClientIp(HttpContext context)
 {
     return context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
@@ -263,7 +359,7 @@ static string GetRateLimitPartition(HttpContext context)
 var app = builder.Build();
 
 // =======================================
-// Database Migration + Seeding (OPT-IN)
+// Database Migration + Seeding (Development only)
 // =======================================
 
 using (var scope = app.Services.CreateScope())
@@ -273,15 +369,7 @@ using (var scope = app.Services.CreateScope())
     var configuration = services.GetRequiredService<IConfiguration>();
     var env = services.GetRequiredService<IHostEnvironment>();
 
-    var isProduction = env.IsProduction();
-    var allowDangerousOps =
-        configuration.GetValue("Startup:AllowDangerousOperationsInProduction", false);
-
-    if (isProduction && !allowDangerousOps)
-    {
-        // skip migrations/seeding unless explicitly allowed
-    }
-    else
+    if (env.IsDevelopment())
     {
         var autoMigrate = configuration.GetValue("Startup:AutoMigrate", env.IsDevelopment());
         if (autoMigrate)
@@ -302,6 +390,8 @@ using (var scope = app.Services.CreateScope())
 // =======================================
 
 app.UseForwardedHeaders();
+app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseMiddleware<RequestLoggingMiddleware>();
 
 if (app.Environment.IsDevelopment())
 {
@@ -318,23 +408,44 @@ app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseHttpsRedirection();
 app.UseCors(corsPolicyName);
 
-app.UseRateLimiter();
-
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 
-app.MapControllers();
-app.MapGet("/health", async (AppDbContext db, CancellationToken ct) =>
+static Task WriteHealthResponse(HttpContext context, HealthReport report)
 {
-    try
+    context.Response.ContentType = "application/json";
+
+    var payload = new
     {
-        await db.Database.ExecuteSqlRawAsync("SELECT 1", ct);
-        return Results.Ok(new { status = "ok" });
-    }
-    catch
-    {
-        return Results.Problem("Database unavailable", statusCode: StatusCodes.Status503ServiceUnavailable);
-    }
-});
+        status = report.Status.ToString(),
+        checks = report.Entries.Select(entry => new
+        {
+            name = entry.Key,
+            status = entry.Value.Status.ToString(),
+            description = entry.Value.Description
+        }),
+        durationMs = report.TotalDuration.TotalMilliseconds
+    };
+
+    return context.Response.WriteAsync(JsonSerializer.Serialize(payload));
+}
+
+app.MapControllers();
+app.MapHealthChecks("/health/live", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("live"),
+    ResponseWriter = WriteHealthResponse
+}).AllowAnonymous();
+app.MapHealthChecks("/health/ready", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready"),
+    ResponseWriter = WriteHealthResponse
+}).AllowAnonymous();
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready"),
+    ResponseWriter = WriteHealthResponse
+}).AllowAnonymous();
 
 app.Run();

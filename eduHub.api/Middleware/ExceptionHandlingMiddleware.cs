@@ -1,9 +1,9 @@
 using System.Net;
-using System.Text.Json;
-using eduHub.api.Models;
-using Microsoft.Extensions.Hosting;
-using eduHub.Application.Common.Exceptions;
 using System.Security.Claims;
+using eduHub.Application.Common.Exceptions;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Infrastructure;
+using Microsoft.Extensions.Hosting;
 
 
 namespace eduHub.api.Middleware;
@@ -13,15 +13,18 @@ public class ExceptionHandlingMiddleware
     private readonly RequestDelegate _next;
     private readonly ILogger<ExceptionHandlingMiddleware> _logger;
     private readonly IHostEnvironment _environment;
+    private readonly ProblemDetailsFactory _problemDetailsFactory;
 
     public ExceptionHandlingMiddleware(
         RequestDelegate next,
         ILogger<ExceptionHandlingMiddleware> logger,
-        IHostEnvironment environment)
+        IHostEnvironment environment,
+        ProblemDetailsFactory problemDetailsFactory)
     {
         _next = next;
         _logger = logger;
         _environment = environment;
+        _problemDetailsFactory = problemDetailsFactory;
     }
 
     public async Task Invoke(HttpContext context)
@@ -41,76 +44,88 @@ public class ExceptionHandlingMiddleware
 
     private async Task HandleExceptionAsync(HttpContext context, Exception exception)
     {
-        var response = context.Response;
-        response.ContentType = "application/json";
-
-        var error = new ErrorResponse();
         HttpStatusCode statusCode;
+        string title;
+        string detail;
+        string code;
+        object? extraDetails = null;
 
         switch (exception)
         {
             case ConflictException:
                 statusCode = HttpStatusCode.Conflict;
-                error.Code = "Conflict";
-                error.Message = _environment.IsDevelopment()
+                code = "Conflict";
+                title = "Conflict";
+                detail = _environment.IsDevelopment()
                     ? exception.Message
                     : "Request could not be completed.";
-                error.Details = new { traceId = context.TraceIdentifier };
                 break;
 
             case InvalidOperationException:
                 statusCode = HttpStatusCode.BadRequest;
-                error.Code = "InvalidOperation";
-                error.Message = _environment.IsDevelopment()
+                code = "InvalidOperation";
+                title = "Invalid request";
+                detail = _environment.IsDevelopment()
                     ? exception.Message
                     : "Invalid request.";
-                error.Details = null;
                 break;
 
             case UnauthorizedAccessException:
                 if (context.User.Identity?.IsAuthenticated == true)
                 {
                     statusCode = HttpStatusCode.Forbidden;
-                    error.Code = "Forbidden";
-                    error.Message = "Forbidden.";
+                    code = "Forbidden";
+                    title = "Forbidden";
+                    detail = "Forbidden.";
                 }
                 else
                 {
                     statusCode = HttpStatusCode.Unauthorized;
-                    error.Code = "Unauthorized";
-                    error.Message = "Unauthorized.";
+                    code = "Unauthorized";
+                    title = "Unauthorized";
+                    detail = "Unauthorized.";
                 }
-                error.Details = null;
                 break;
 
             case KeyNotFoundException:
                 statusCode = HttpStatusCode.NotFound;
-                error.Code = "NotFound";
-                error.Message = "Not found.";
-                error.Details = null;
+                code = "NotFound";
+                title = "Not found";
+                detail = "Not found.";
                 break;
 
             default:
                 statusCode = HttpStatusCode.InternalServerError;
-                error.Code = "ServerError";
-                error.Message = "An unexpected error occurred.";
-                error.Details = _environment.IsDevelopment()
-                    ? new
+                code = "ServerError";
+                title = "Server error";
+                detail = "An unexpected error occurred.";
+                if (_environment.IsDevelopment())
+                {
+                    extraDetails = new
                     {
-                        traceId = context.TraceIdentifier,
-                        error = exception.Message,
+                        exception = exception.GetType().FullName,
+                        message = exception.Message,
                         stackTrace = exception.StackTrace
-                    }
-                    : new
-                    {
-                        traceId = context.TraceIdentifier
                     };
+                }
                 break;
         }
 
-        response.StatusCode = (int)statusCode;
+        var status = (int)statusCode;
+        var problem = _problemDetailsFactory.CreateProblemDetails(
+            context,
+            statusCode: status,
+            title: title,
+            detail: detail,
+            type: $"https://httpstatuses.com/{status}");
 
-        var json = JsonSerializer.Serialize(error);
-        await response.WriteAsync(json);
+        problem.Extensions["code"] = code;
+        problem.Extensions["traceId"] = context.TraceIdentifier;
+        if (extraDetails != null)
+            problem.Extensions["details"] = extraDetails;
+
+        context.Response.StatusCode = status;
+        context.Response.ContentType = "application/problem+json";
+        await context.Response.WriteAsJsonAsync(problem, cancellationToken: context.RequestAborted);
     }
 }

@@ -1,10 +1,11 @@
 ﻿using eduHub.Application.DTOs.Users;
 using eduHub.Application.Interfaces.Users;
+using eduHub.Application.Security;
 using eduHub.Domain.Entities;
 using eduHub.Domain.Enums;
 using eduHub.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
 using System.IdentityModel.Tokens.Jwt;
@@ -18,13 +19,13 @@ namespace eduHub.Infrastructure.Services;
 public class UserService : IUserService
 {
     private readonly AppDbContext _context;
-    private readonly IConfiguration _configuration;
+    private readonly JwtOptions _jwtOptions;
     private static readonly string DummyPasswordHash = BCrypt.Net.BCrypt.HashPassword("eduHub-dummy-password");
 
-    public UserService(AppDbContext context, IConfiguration configuration)
+    public UserService(AppDbContext context, IOptions<JwtOptions> jwtOptions)
     {
         _context = context;
-        _configuration = configuration;
+        _jwtOptions = jwtOptions.Value;
     }
 
     public async Task<UserResponseDto> RegisterAsync(UserRegisterDto dto)
@@ -83,12 +84,10 @@ public class UserService : IUserService
         if (!valid)
             return null;
 
-        var accessToken = GenerateJwtToken(user, out var expiresAtUtc, out _);
+        var accessToken = GenerateJwtToken(user, out var expiresAtUtc, out _);  
 
         var now = DateTimeOffset.UtcNow;
-        var refreshDays = _configuration.GetValue("Jwt:RefreshTokenDays", 30);
-        if (refreshDays < 1 || refreshDays > 90)
-            throw new InvalidOperationException("Jwt:RefreshTokenDays must be between 1 and 90.");
+        var refreshDays = _jwtOptions.RefreshTokenDays;
 
         var refreshToken = GenerateSecureToken();
         var refreshTokenHash = HashToken(refreshToken);
@@ -157,9 +156,7 @@ public class UserService : IUserService
 
         var accessToken = GenerateJwtToken(user, out var accessExpiresAtUtc, out _);
 
-        var refreshDays = _configuration.GetValue("Jwt:RefreshTokenDays", 30);
-        if (refreshDays < 1 || refreshDays > 90)
-            throw new InvalidOperationException("Jwt:RefreshTokenDays must be between 1 and 90.");
+        var refreshDays = _jwtOptions.RefreshTokenDays;
 
         var newRefreshToken = GenerateSecureToken();
         var newRefreshHash = HashToken(newRefreshToken);
@@ -247,20 +244,9 @@ public class UserService : IUserService
 
     private string GenerateJwtToken(User user, out DateTimeOffset expiresAtUtc, out string jti)
     {
-        var jwtSection = _configuration.GetSection("Jwt");
-        var key = jwtSection["Key"];
-        if (string.IsNullOrWhiteSpace(key))
-            throw new InvalidOperationException("Jwt:Key is missing.");
-        if (Encoding.UTF8.GetByteCount(key) < 32)
-            throw new InvalidOperationException("Jwt:Key must be at least 32 bytes (256-bit).");
-
-        var issuer = jwtSection["Issuer"];
-        if (string.IsNullOrWhiteSpace(issuer))
-            issuer = "eduHub";
-
-        var audience = jwtSection["Audience"];
-        if (string.IsNullOrWhiteSpace(audience))
-            audience = "eduHub";
+        var key = _jwtOptions.Key;
+        var issuer = _jwtOptions.Issuer;
+        var audience = _jwtOptions.Audience;
 
         jti = Guid.NewGuid().ToString("N");
         var claims = new List<Claim>
@@ -276,9 +262,7 @@ public class UserService : IUserService
         var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
         var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
 
-        var minutes = _configuration.GetValue("Jwt:AccessTokenMinutes", 15);
-        if (minutes < 5 || minutes > 60)
-            throw new InvalidOperationException("Jwt:AccessTokenMinutes must be between 5 and 60.");
+        var minutes = _jwtOptions.AccessTokenMinutes;
         var now = DateTimeOffset.UtcNow;
         expiresAtUtc = now.AddMinutes(minutes);
 

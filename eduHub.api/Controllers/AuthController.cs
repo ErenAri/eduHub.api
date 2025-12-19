@@ -10,7 +10,7 @@ namespace eduHub.api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class AuthController : ControllerBase
+public class AuthController : ApiControllerBase
 {
     private readonly IUserService _userService;
 
@@ -26,12 +26,9 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     [EnableRateLimiting("auth")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<UserResponseDto>> Register([FromBody] UserRegisterDto dto)
     {
-        if (!ModelState.IsValid)
-            return BadRequest(ModelState);
-
         try
         {
             var user = await _userService.RegisterAsync(dto);
@@ -39,7 +36,7 @@ public class AuthController : ControllerBase
         }
         catch (InvalidOperationException)
         {
-            return BadRequest("Unable to register.");
+            return BadRequestProblem("Unable to register.", "RegistrationFailed");
         }
     }
 
@@ -50,15 +47,12 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     [EnableRateLimiting("auth")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<AuthResponseDto>> Login([FromBody] UserLoginDto dto)
     {
-        if (!ModelState.IsValid)
-            return BadRequest(ModelState);
-
         var auth = await _userService.LoginAsync(dto);
         if (auth == null)
-            return BadRequest("Invalid credentials.");
+            return BadRequestProblem("Invalid credentials.", "InvalidCredentials");
 
         return Ok(auth);
     }
@@ -70,15 +64,16 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     [EnableRateLimiting("auth")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<AuthResponseDto>> Refresh([FromBody] RefreshRequestDto dto)
     {
-        if (!ModelState.IsValid || string.IsNullOrWhiteSpace(dto.RefreshToken))
-            return BadRequest("Refresh token is required.");
+        if (string.IsNullOrWhiteSpace(dto.RefreshToken))
+            return BadRequestProblem("Refresh token is required.", "RefreshTokenRequired");
 
         var auth = await _userService.RefreshAsync(dto);
         if (auth == null)
-            return Unauthorized();
+            return UnauthorizedProblem("Invalid refresh token.");
 
         return Ok(auth);
     }
@@ -89,7 +84,7 @@ public class AuthController : ControllerBase
     [HttpPost("logout")]
     [Authorize]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Logout()
     {
         var jti = User.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
@@ -97,7 +92,7 @@ public class AuthController : ControllerBase
         var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
         if (string.IsNullOrWhiteSpace(jti) || string.IsNullOrWhiteSpace(userId) || !int.TryParse(userId, out var parsedUserId))
-            return BadRequest("Invalid token.");
+            return BadRequestProblem("Invalid token.", "InvalidToken");
 
         var expiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(1);
         if (long.TryParse(expClaim, out var expSeconds))

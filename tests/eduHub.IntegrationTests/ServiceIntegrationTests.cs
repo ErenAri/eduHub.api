@@ -1,15 +1,15 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using eduHub.Application.DTOs.Reservations;
 using eduHub.Application.DTOs.Users;
+using eduHub.Application.Security;
 using eduHub.Domain.Entities;
 using eduHub.Domain.Enums;
 using eduHub.Infrastructure.Persistence;
 using eduHub.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Testcontainers.PostgreSql;
 
 namespace eduHub.IntegrationTests;
@@ -36,8 +36,8 @@ public class ServiceIntegrationTests : IAsyncLifetime
     public async Task RefreshTokenReuse_RevokesAllTokensForUser()
     {
         await using var context = await CreateDbContextAsync();
-        var config = BuildConfiguration();
-        var userService = new UserService(context, config);
+        var jwtOptions = BuildJwtOptions();
+        var userService = new UserService(context, jwtOptions);
 
         var password = "StrongPassword123!";
         var registered = await userService.RegisterAsync(new UserRegisterDto
@@ -81,8 +81,8 @@ public class ServiceIntegrationTests : IAsyncLifetime
     public async Task LogoutRevokesRefreshTokensForUser()
     {
         await using var context = await CreateDbContextAsync();
-        var config = BuildConfiguration();
-        var userService = new UserService(context, config);
+        var jwtOptions = BuildJwtOptions();
+        var userService = new UserService(context, jwtOptions);
 
         var password = "StrongPassword123!";
         var registered = await userService.RegisterAsync(new UserRegisterDto
@@ -253,20 +253,18 @@ public class ServiceIntegrationTests : IAsyncLifetime
             "TRUNCATE TABLE buildings, rooms, reservations, users, refresh_tokens, revoked_tokens RESTART IDENTITY CASCADE;");
     }
 
-    private static IConfiguration BuildConfiguration()
+    private static IOptions<JwtOptions> BuildJwtOptions()
     {
-        var settings = new Dictionary<string, string?>
+        var options = new JwtOptions
         {
-            ["Jwt:Key"] = "test-key-test-key-test-key-test-key-1234",
-            ["Jwt:Issuer"] = "eduHub",
-            ["Jwt:Audience"] = "eduHub",
-            ["Jwt:AccessTokenMinutes"] = "15",
-            ["Jwt:RefreshTokenDays"] = "7"
+            Key = "test-key-test-key-test-key-test-key-1234",
+            Issuer = "eduHub",
+            Audience = "eduHub",
+            AccessTokenMinutes = 15,
+            RefreshTokenDays = 7
         };
 
-        return new ConfigurationBuilder()
-            .AddInMemoryCollection(settings)
-            .Build();
+        return Options.Create(options);
     }
 
     private static User CreateUser(string prefix)

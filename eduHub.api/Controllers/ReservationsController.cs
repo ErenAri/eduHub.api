@@ -11,7 +11,7 @@ namespace eduHub.api.Controllers
     [ApiController]
     [Route("api/[controller]")]
     [Authorize]
-    public class ReservationsController : ControllerBase
+    public class ReservationsController : ApiControllerBase
     {
         private readonly IReservationService _reservationService;
 
@@ -27,7 +27,7 @@ namespace eduHub.api.Controllers
             var isAdmin = IsCurrentUserAdmin();
             var reservation = await _reservationService.GetByIdAsync(id, userId, isAdmin);
             if (reservation == null)
-                return NotFound();
+                return NotFoundProblem();
 
             return Ok(reservation);
         }
@@ -98,7 +98,7 @@ namespace eduHub.api.Controllers
 
             var deleted = await _reservationService.DeleteAsync(id, userId, isAdmin);
             if (!deleted)
-                return NotFound();
+                return NotFoundProblem();
 
             return NoContent();
         }

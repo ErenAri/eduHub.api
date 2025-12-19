@@ -1,0 +1,7 @@
+<Project>
+  <ItemGroup>
+    <Compile Remove="**\bin\**" />
+    <Compile Remove="**\obj\**" />
+    <Compile Remove="**\.tmp\**" />
+  </ItemGroup>
+</Project>

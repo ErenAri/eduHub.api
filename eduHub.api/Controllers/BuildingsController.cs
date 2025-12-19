@@ -11,7 +11,7 @@ namespace eduHub.api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
-public class BuildingsController : ControllerBase
+public class BuildingsController : ApiControllerBase
 {
     private readonly IBuildingService _buildingService;
 
@@ -23,7 +23,7 @@ public class BuildingsController : ControllerBase
     // GET api/Buildings?page=&pageSize=
     [HttpGet]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
 
     public async Task<ActionResult<CursorPageResponse<BuildingResponseDto>>> GetBuildings(
         [FromQuery] int pageSize = 20,
@@ -49,13 +49,13 @@ public class BuildingsController : ControllerBase
     // GET api/Buildings/5
     [HttpGet("{id:int}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<BuildingResponseDto>> GetBuildingById(int id)
     {
         var building = await _buildingService.GetByIdAsync(id);
         if (building == null)
-            return NotFound();
+            return NotFoundProblem();
 
         var response = new BuildingResponseDto
         {
@@ -69,13 +69,10 @@ public class BuildingsController : ControllerBase
     // POST api/Buildings
     [HttpPost]
     [ProducesResponseType(StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<BuildingResponseDto>> CreateBuilding([FromBody] BuildingCreateDto dto)
     {
-        if (!ModelState.IsValid)
-            return BadRequest(ModelState);
-
         var building = new Building
         {
             Name = dto.Name
@@ -95,20 +92,17 @@ public class BuildingsController : ControllerBase
     // PUT api/Buildings/5
     [HttpPut("{id:int}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<BuildingResponseDto>> UpdateBuilding(int id, [FromBody] BuildingUpdateDto dto)
     {
         if (id != dto.Id)
-            return BadRequest("Route id and body id do not match.");
-
-        if (!ModelState.IsValid)
-            return BadRequest(ModelState);
+            return BadRequestProblem("Route id and body id do not match.");
 
         var building = await _buildingService.GetByIdAsync(id);
         if (building == null)
-            return NotFound();
+            return NotFoundProblem();
 
         building.Name = dto.Name;
 
@@ -126,13 +120,13 @@ public class BuildingsController : ControllerBase
     // DELETE api/Buildings/5
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> DeleteBuilding(int id)
     {
         var building = await _buildingService.GetByIdAsync(id);
         if (building == null)
-            return NotFound();
+            return NotFoundProblem();
 
         await _buildingService.DeleteAsync(id);
         return NoContent();

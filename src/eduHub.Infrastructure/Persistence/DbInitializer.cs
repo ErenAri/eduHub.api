@@ -23,6 +23,9 @@ public static class DbInitializer
         var seedAdmin = configuration.GetValue("Seed:Admin:Enabled", false);
         if (seedAdmin)
         {
+            if (!env.IsDevelopment())
+                throw new InvalidOperationException("Admin seeding is only supported in Development.");
+
             var adminPassword = configuration["Seed:Admin:Password"];
             await SeedAdminUserAsync(context, configuration, adminPassword);
         }
