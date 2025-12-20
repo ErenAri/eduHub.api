@@ -29,7 +29,7 @@ using System.Text.Json;
 using System.Threading.RateLimiting;
 using System.Security.Claims;
 using eduHub.Application.Security;
-using IPNetwork = System.Net.IPNetwork;
+using IPNetwork = Microsoft.AspNetCore.HttpOverrides.IPNetwork;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -215,16 +215,34 @@ builder.Services.AddAuthorization(options =>
         .Build();
 });
 
+var trustAllForwarders = builder.Configuration.GetValue("ForwardedHeaders:TrustAll", false);
+var ingressLockedDown = builder.Configuration.GetValue("ForwardedHeaders:IngressLockedDown", false);
+var trustedForwardingConfigured =
+    builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").GetChildren().Any() ||
+    builder.Configuration.GetSection("ForwardedHeaders:KnownNetworks").GetChildren().Any();
+var requireKnownProxies = builder.Configuration.GetValue("ForwardedHeaders:RequireKnownProxies", true);
+if (trustAllForwarders && !ingressLockedDown)
+    throw new InvalidOperationException("ForwardedHeaders:TrustAll requires ingress to be locked down.");
+if (builder.Environment.IsProduction() && !trustAllForwarders && requireKnownProxies && !trustedForwardingConfigured)
+    throw new InvalidOperationException("Configure ForwardedHeaders:KnownProxies or KnownNetworks for production behind a proxy.");
+
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
     options.KnownProxies.Clear();
-    options.KnownIPNetworks.Clear();
+    options.KnownNetworks.Clear();
+
+    options.ForwardLimit = builder.Configuration.GetValue<int?>("ForwardedHeaders:ForwardLimit") ?? 2;
+
+    if (trustAllForwarders)
+    {
+        options.KnownNetworks.Add(new IPNetwork(IPAddress.Any, 0));
+        options.KnownNetworks.Add(new IPNetwork(IPAddress.IPv6Any, 0));
+        return;
+    }
 
     options.KnownProxies.Add(IPAddress.Loopback);
     options.KnownProxies.Add(IPAddress.IPv6Loopback);
-
-    options.ForwardLimit = builder.Configuration.GetValue<int?>("ForwardedHeaders:ForwardLimit") ?? 2;
 
     foreach (var child in builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").GetChildren())
     {
@@ -245,16 +263,9 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
         if (!IPAddress.TryParse(parts[0], out var prefix) || !int.TryParse(parts[1], out var prefixLength))
             continue;
 
-        options.KnownIPNetworks.Add(new IPNetwork(prefix, prefixLength));
+        options.KnownNetworks.Add(new IPNetwork(prefix, prefixLength));
     }
 });
-
-var trustedForwardingConfigured =
-    builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").GetChildren().Any() ||
-    builder.Configuration.GetSection("ForwardedHeaders:KnownNetworks").GetChildren().Any();
-var requireKnownProxies = builder.Configuration.GetValue("ForwardedHeaders:RequireKnownProxies", true);
-if (builder.Environment.IsProduction() && requireKnownProxies && !trustedForwardingConfigured)
-    throw new InvalidOperationException("Configure ForwardedHeaders:KnownProxies or KnownNetworks for production behind a proxy.");
 
 builder.Services.AddRateLimiter(options =>
 {
@@ -350,9 +361,12 @@ static string GetClientIp(HttpContext context)
 
 static string GetRateLimitPartition(HttpContext context)
 {
-    var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
-    if (!string.IsNullOrEmpty(userId))
-        return $"user:{userId}";
+    if (context.User?.Identity?.IsAuthenticated == true)
+    {
+        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!string.IsNullOrWhiteSpace(userId))
+            return $"user:{userId}";
+    }
 
     return $"ip:{GetClientIp(context)}";
 }
@@ -368,6 +382,10 @@ using (var scope = app.Services.CreateScope())
     var db = services.GetRequiredService<AppDbContext>();
     var configuration = services.GetRequiredService<IConfiguration>();
     var env = services.GetRequiredService<IHostEnvironment>();
+
+    var adminSeedingEnabled = configuration.GetValue("Seed:Admin:Enabled", false);
+    if (adminSeedingEnabled && !env.IsDevelopment())
+        throw new InvalidOperationException("Admin seeding is only supported in Development.");
 
     if (env.IsDevelopment())
     {
@@ -409,8 +427,8 @@ app.UseHttpsRedirection();
 app.UseCors(corsPolicyName);
 
 app.UseAuthentication();
-app.UseRateLimiter();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 static Task WriteHealthResponse(HttpContext context, HealthReport report)
 {
@@ -441,11 +459,6 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 {
     Predicate = check => check.Tags.Contains("ready"),
     ResponseWriter = WriteHealthResponse
-}).AllowAnonymous();
-app.MapHealthChecks("/health", new HealthCheckOptions
-{
-    Predicate = check => check.Tags.Contains("ready"),
-    ResponseWriter = WriteHealthResponse
-}).AllowAnonymous();
+}).RequireAuthorization();
 
 app.Run();

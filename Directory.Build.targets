@@ -1,7 +1,8 @@
 <Project>
   <ItemGroup>
-    <Compile Remove="**\bin\**" />
-    <Compile Remove="**\obj\**" />
-    <Compile Remove="**\.tmp\**" />
+    <Compile Remove="**/bin/**;**/obj/**;**/.vs/**;**/.tmp/**" />
+    <None Remove="**/bin/**;**/obj/**;**/.vs/**;**/.tmp/**" />
+    <Content Remove="**/bin/**;**/obj/**;**/.vs/**;**/.tmp/**" />
+    <EmbeddedResource Remove="**/bin/**;**/obj/**;**/.vs/**;**/.tmp/**" />
   </ItemGroup>
 </Project>

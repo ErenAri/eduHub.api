@@ -28,14 +28,25 @@ public class ApiEndpointTests
     }
 
     [Fact]
-    public async Task Health_ReturnsOk()
+    public async Task Health_Live_ReturnsOk()
     {
         await _fixture.ResetDatabaseAsync();
         using var client = _fixture.CreateClient(NextClientIp());
 
-        var response = await client.GetAsync("/health");
+        var response = await client.GetAsync("/health/live");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Health_Ready_RequiresAuth()
+    {
+        await _fixture.ResetDatabaseAsync();
+        using var client = _fixture.CreateClient(NextClientIp());
+
+        var response = await client.GetAsync("/health/ready");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]
@@ -43,7 +54,7 @@ public class ApiEndpointTests
     {
         await _fixture.ResetDatabaseAsync();
 
-        var password = "Password123!";
+        var password = NewPassword();
         var user = await CreateUserAsync(UserRole.User, password);
         using var client = _fixture.CreateClient(NextClientIp());
 
@@ -57,7 +68,7 @@ public class ApiEndpointTests
     {
         await _fixture.ResetDatabaseAsync();
 
-        var password = "AdminPass123!";
+        var password = NewPassword();
         var admin = await CreateUserAsync(UserRole.Admin, password);
         using var client = _fixture.CreateClient(NextClientIp());
         var auth = await LoginAsync(client, admin.UserName, password);
@@ -73,7 +84,7 @@ public class ApiEndpointTests
     {
         await _fixture.ResetDatabaseAsync();
 
-        var password = "AdminPass123!";
+        var password = NewPassword();
         var admin = await CreateUserAsync(UserRole.Admin, password);
         using var client = _fixture.CreateClient(NextClientIp());
         var auth = await LoginAsync(client, admin.UserName, password);
@@ -91,9 +102,9 @@ public class ApiEndpointTests
     {
         await _fixture.ResetDatabaseAsync();
 
-        var adminPassword = "AdminPass123!";
+        var adminPassword = NewPassword();
         var admin = await CreateUserAsync(UserRole.Admin, adminPassword);
-        var userPassword = "UserPass123!";
+        var userPassword = NewPassword();
         var user = await CreateUserAsync(UserRole.User, userPassword);
 
         using var adminClient = _fixture.CreateClient(NextClientIp());
@@ -131,9 +142,9 @@ public class ApiEndpointTests
     {
         await _fixture.ResetDatabaseAsync();
 
-        var adminPassword = "AdminPass123!";
+        var adminPassword = NewPassword();
         var admin = await CreateUserAsync(UserRole.Admin, adminPassword);
-        var userPassword = "UserPass123!";
+        var userPassword = NewPassword();
         var user = await CreateUserAsync(UserRole.User, userPassword);
 
         using var adminClient = _fixture.CreateClient(NextClientIp());
@@ -175,7 +186,7 @@ public class ApiEndpointTests
     {
         await _fixture.ResetDatabaseAsync();
 
-        var password = "UserPass123!";
+        var password = NewPassword();
         var user = await CreateUserAsync(UserRole.User, password);
         using var client = _fixture.CreateClient("10.0.0.42");
 
@@ -201,6 +212,11 @@ public class ApiEndpointTests
         var next = Interlocked.Increment(ref _ipCounter);
         var octet = (next % 200) + 10;
         return $"10.0.0.{octet}";
+    }
+
+    private static string NewPassword()
+    {
+        return $"Pass-{Guid.NewGuid():N}!";
     }
 
     private async Task<User> CreateUserAsync(UserRole role, string password)

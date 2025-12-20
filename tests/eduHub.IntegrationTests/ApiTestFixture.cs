@@ -16,8 +16,8 @@ public sealed class ApiTestFixture : IAsyncLifetime
 {
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder()
         .WithDatabase("eduhub_api_tests")
-        .WithUsername("postgres")
-        .WithPassword("postgres")
+        .WithUsername($"user_{Guid.NewGuid():N}")
+        .WithPassword($"pass_{Guid.NewGuid():N}")
         .Build();
 
     private WebApplicationFactory<Program>? _factory;
@@ -68,10 +68,11 @@ public sealed class ApiTestFixture : IAsyncLifetime
                 builder.UseEnvironment("Development");
                 builder.ConfigureAppConfiguration((_, config) =>
                 {
+                    var jwtKey = NewJwtKey();
                     var settings = new Dictionary<string, string?>
                     {
                         ["ConnectionStrings:DefaultConnection"] = _postgres.GetConnectionString(),
-                        ["Jwt:Key"] = "test-key-test-key-test-key-test-key-1234",
+                        ["Jwt:Key"] = jwtKey,
                         ["Jwt:Issuer"] = "eduHub",
                         ["Jwt:Audience"] = "eduHub",
                         ["Jwt:AccessTokenMinutes"] = "15",
@@ -94,5 +95,10 @@ public sealed class ApiTestFixture : IAsyncLifetime
         await db.Database.MigrateAsync();
         await db.Database.ExecuteSqlRawAsync(
             "TRUNCATE TABLE buildings, rooms, reservations, users, refresh_tokens, revoked_tokens RESTART IDENTITY CASCADE;");
+    }
+
+    private static string NewJwtKey()
+    {
+        return $"{Guid.NewGuid():N}{Guid.NewGuid():N}";
     }
 }

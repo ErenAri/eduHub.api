@@ -1,8 +1,8 @@
-# Local configuration (may contain secrets)
 appsettings.Development.json
 appsettings.Local.json
 appsettings.*.local.json
 
-# Environment files
 .env
 .env.*
+**/.tmp/
+**/.tmp/**

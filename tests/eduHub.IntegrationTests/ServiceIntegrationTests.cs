@@ -18,8 +18,8 @@ public class ServiceIntegrationTests : IAsyncLifetime
 {
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder()
         .WithDatabase("eduhub_integration")
-        .WithUsername("postgres")
-        .WithPassword("postgres")
+        .WithUsername($"user_{Guid.NewGuid():N}")
+        .WithPassword($"pass_{Guid.NewGuid():N}")
         .Build();
 
     public async Task InitializeAsync()
@@ -39,7 +39,7 @@ public class ServiceIntegrationTests : IAsyncLifetime
         var jwtOptions = BuildJwtOptions();
         var userService = new UserService(context, jwtOptions);
 
-        var password = "StrongPassword123!";
+        var password = NewPassword();
         var registered = await userService.RegisterAsync(new UserRegisterDto
         {
             UserName = $"user-{Guid.NewGuid():N}",
@@ -84,7 +84,7 @@ public class ServiceIntegrationTests : IAsyncLifetime
         var jwtOptions = BuildJwtOptions();
         var userService = new UserService(context, jwtOptions);
 
-        var password = "StrongPassword123!";
+        var password = NewPassword();
         var registered = await userService.RegisterAsync(new UserRegisterDto
         {
             UserName = $"user-{Guid.NewGuid():N}",
@@ -257,7 +257,7 @@ public class ServiceIntegrationTests : IAsyncLifetime
     {
         var options = new JwtOptions
         {
-            Key = "test-key-test-key-test-key-test-key-1234",
+            Key = NewJwtKey(),
             Issuer = "eduHub",
             Audience = "eduHub",
             AccessTokenMinutes = 15,
@@ -278,5 +278,15 @@ public class ServiceIntegrationTests : IAsyncLifetime
             Role = UserRole.User,
             CreatedAtUtc = DateTime.UtcNow
         };
+    }
+
+    private static string NewPassword()
+    {
+        return $"Pass-{Guid.NewGuid():N}!";
+    }
+
+    private static string NewJwtKey()
+    {
+        return $"{Guid.NewGuid():N}{Guid.NewGuid():N}";
     }
 }

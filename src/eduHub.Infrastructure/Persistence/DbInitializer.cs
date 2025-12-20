@@ -17,15 +17,15 @@ public static class DbInitializer
         IHostEnvironment env)
     {
         var seedEnabled = configuration.GetValue("Seed:Enabled", env.IsDevelopment());
+        var seedAdmin = configuration.GetValue("Seed:Admin:Enabled", false);
+        if (seedAdmin && !env.IsDevelopment())
+            throw new InvalidOperationException("Admin seeding is only supported in Development.");
+
         if (!seedEnabled)
             return;
 
-        var seedAdmin = configuration.GetValue("Seed:Admin:Enabled", false);
         if (seedAdmin)
         {
-            if (!env.IsDevelopment())
-                throw new InvalidOperationException("Admin seeding is only supported in Development.");
-
             var adminPassword = configuration["Seed:Admin:Password"];
             await SeedAdminUserAsync(context, configuration, adminPassword);
         }

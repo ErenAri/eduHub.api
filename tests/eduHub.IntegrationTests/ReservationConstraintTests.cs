@@ -10,8 +10,8 @@ public class ReservationConstraintTests : IAsyncLifetime
 {
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder()
         .WithDatabase("eduhub_integration")
-        .WithUsername("postgres")
-        .WithPassword("postgres")
+        .WithUsername($"user_{Guid.NewGuid():N}")
+        .WithPassword($"pass_{Guid.NewGuid():N}")
         .Build();
 
     public async Task InitializeAsync()
