@@ -16,8 +16,8 @@ param planSkuName string = 'P1v3'
 @minValue(1)
 param planSkuCapacity int = 1
 
-@description('App Service runtime stack, e.g. DOTNETCORE|10.0.')
-param linuxFxVersion string = 'DOTNETCORE|10.0'
+@description('App Service runtime stack, e.g. DOTNETCORE|8.0.')
+param linuxFxVersion string = 'DOTNETCORE|8.0'
 
 @description('Create a staging slot.')
 param createSlot bool = true
@@ -27,6 +27,9 @@ param slotName string = 'staging'
 
 @description('Use the staging slot as the Front Door origin.')
 param frontDoorUseStagingSlot bool = true
+
+@description('Deploy Azure Front Door resources.')
+param deployFrontDoor bool = false
 
 @description('ASP.NET Core environment.')
 param environmentName string = 'Production'
@@ -86,6 +89,10 @@ var slotHostName = '${appName}-${slotName}.azurewebsites.net'
 var useStagingSlot = createSlot && frontDoorUseStagingSlot
 var originHostName = useStagingSlot ? slotHostName : appHostName
 
+var effectiveForwardedHeadersTrustAll = deployFrontDoor ? forwardedHeadersTrustAll : false
+var effectiveForwardedHeadersIngressLockedDown = deployFrontDoor ? forwardedHeadersIngressLockedDown : false
+var effectiveForwardedHeadersRequireKnownProxies = deployFrontDoor ? forwardedHeadersRequireKnownProxies : false
+
 var baseAppSettings = [
   {
     name: 'ASPNETCORE_ENVIRONMENT'
@@ -117,15 +124,15 @@ var baseAppSettings = [
   }
   {
     name: 'ForwardedHeaders__TrustAll'
-    value: forwardedHeadersTrustAll ? 'true' : 'false'
+    value: effectiveForwardedHeadersTrustAll ? 'true' : 'false'
   }
   {
     name: 'ForwardedHeaders__IngressLockedDown'
-    value: forwardedHeadersIngressLockedDown ? 'true' : 'false'
+    value: effectiveForwardedHeadersIngressLockedDown ? 'true' : 'false'
   }
   {
     name: 'ForwardedHeaders__RequireKnownProxies'
-    value: forwardedHeadersRequireKnownProxies ? 'true' : 'false'
+    value: effectiveForwardedHeadersRequireKnownProxies ? 'true' : 'false'
   }
   {
     name: 'ForwardedHeaders__ForwardLimit'
@@ -142,7 +149,7 @@ var corsAppSettings = [
 
 var appSettings = concat(baseAppSettings, corsAppSettings)
 
-var baseIpRestrictions = [
+var baseIpRestrictions = deployFrontDoor ? [
   {
     name: 'AllowAzureFrontDoor'
     description: 'Allow Azure Front Door backends.'
@@ -151,7 +158,7 @@ var baseIpRestrictions = [
     ipAddress: 'AzureFrontDoor.Backend'
     tag: 'ServiceTag'
   }
-]
+] : []
 
 var extraIpRestrictions = [
   for (cidr, i) in allowedIpCidrs: {
@@ -163,7 +170,9 @@ var extraIpRestrictions = [
   }
 ]
 
-var ipSecurityRestrictions = concat(baseIpRestrictions, extraIpRestrictions)
+var useIpRestrictions = deployFrontDoor || length(allowedIpCidrs) > 0
+var ipSecurityRestrictions = useIpRestrictions ? concat(baseIpRestrictions, extraIpRestrictions) : []
+var ipSecurityRestrictionsDefaultAction = useIpRestrictions ? 'Deny' : 'Allow'
 
 var siteConfig = {
   linuxFxVersion: linuxFxVersion
@@ -173,9 +182,9 @@ var siteConfig = {
   healthCheckPath: '/health/live'
   appSettings: appSettings
   ipSecurityRestrictions: ipSecurityRestrictions
-  ipSecurityRestrictionsDefaultAction: 'Deny'
+  ipSecurityRestrictionsDefaultAction: ipSecurityRestrictionsDefaultAction
   scmIpSecurityRestrictionsUseMain: true
-  scmIpSecurityRestrictionsDefaultAction: 'Deny'
+  scmIpSecurityRestrictionsDefaultAction: ipSecurityRestrictionsDefaultAction
 }
 
 resource appPlan 'Microsoft.Web/serverfarms@2022-03-01' = {
@@ -204,7 +213,8 @@ resource app 'Microsoft.Web/sites@2022-03-01' = {
 }
 
 resource appSlot 'Microsoft.Web/sites/slots@2022-03-01' = if (createSlot) {
-  name: '${app.name}/${slotName}'
+  parent: app
+  name: slotName
   location: location
   kind: 'app,linux'
   properties: {
@@ -215,24 +225,24 @@ resource appSlot 'Microsoft.Web/sites/slots@2022-03-01' = if (createSlot) {
   }
 }
 
-resource frontDoorProfile 'Microsoft.Cdn/profiles@2022-05-01' = {
+resource frontDoorProfile 'Microsoft.Cdn/profiles@2024-02-01' = if (deployFrontDoor) {
   name: frontDoorProfileName
-  location: 'Global'
+  location: 'global'
   sku: {
     name: frontDoorSkuName
   }
 }
 
-resource frontDoorEndpoint 'Microsoft.Cdn/profiles/afdEndpoints@2022-05-01' = {
+resource frontDoorEndpoint 'Microsoft.Cdn/profiles/afdEndpoints@2024-02-01' = if (deployFrontDoor) {
   parent: frontDoorProfile
   name: frontDoorEndpointName
-  location: 'Global'
+  location: 'global'
   properties: {
     enabledState: 'Enabled'
   }
 }
 
-resource frontDoorOriginGroup 'Microsoft.Cdn/profiles/originGroups@2022-05-01' = {
+resource frontDoorOriginGroup 'Microsoft.Cdn/profiles/originGroups@2024-02-01' = if (deployFrontDoor) {
   parent: frontDoorProfile
   name: frontDoorOriginGroupName
   properties: {
@@ -250,7 +260,7 @@ resource frontDoorOriginGroup 'Microsoft.Cdn/profiles/originGroups@2022-05-01' =
   }
 }
 
-resource frontDoorOrigin 'Microsoft.Cdn/profiles/originGroups/origins@2022-05-01' = {
+resource frontDoorOrigin 'Microsoft.Cdn/profiles/originGroups/origins@2024-02-01' = if (deployFrontDoor) {
   parent: frontDoorOriginGroup
   name: frontDoorOriginName
   properties: {
@@ -264,7 +274,7 @@ resource frontDoorOrigin 'Microsoft.Cdn/profiles/originGroups/origins@2022-05-01
   }
 }
 
-resource frontDoorRoute 'Microsoft.Cdn/profiles/afdEndpoints/routes@2022-05-01' = {
+resource frontDoorRoute 'Microsoft.Cdn/profiles/afdEndpoints/routes@2024-02-01' = if (deployFrontDoor) {
   parent: frontDoorEndpoint
   name: frontDoorRouteName
   properties: {
@@ -288,4 +298,4 @@ resource frontDoorRoute 'Microsoft.Cdn/profiles/afdEndpoints/routes@2022-05-01' 
 }
 
 output appServiceHostName string = appHostName
-output frontDoorHostName string = frontDoorEndpoint.properties.hostName
+output frontDoorHostName string = deployFrontDoor ? frontDoorEndpoint.properties.hostName : ''

@@ -1,0 +1,18 @@
+  {
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+      "planName": { "value": "eh-prod-plan" },
+      "appName": { "value": "eh-api-prod" },
+      "jwtKey": { "value": "<32+ bytes>" },
+      "dbConnectionString": { "value": "<connection string>" },
+      "corsAllowedOrigins": { "value": ["https://example.com"] },
+      "frontDoorProfileName": { "value": "eh-fd-profile" },
+      "frontDoorEndpointName": { "value": "eh-fd-endpoint" },
+      "frontDoorOriginGroupName": { "value": "eh-fd-og" },
+      "frontDoorOriginName": { "value": "eh-fd-origin" },
+      "frontDoorRouteName": { "value": "eh-fd-route" },
+      "deployFrontDoor": { "value": false },
+      "planSkuName": { "value": "S1" }
+    }
+  }
