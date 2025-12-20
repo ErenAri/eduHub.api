@@ -13,6 +13,7 @@
       "frontDoorOriginName": { "value": "eh-fd-origin" },
       "frontDoorRouteName": { "value": "eh-fd-route" },
       "deployFrontDoor": { "value": false },
-      "planSkuName": { "value": "S1" }
+      "planSkuName": { "value": "S1" },
+      "planSkuCapacity": { "value": 2 }
     }
   }
