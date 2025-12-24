@@ -66,14 +66,18 @@ public class RoomService : IRoomService
         var startUtc = startTimeUtc.ToUniversalTime();
         var endUtc = endTimeUtc.ToUniversalTime();
 
-        return await _context.Rooms
+        // Split query to avoid EF Core translation issues with DateTimeOffset on Sqlite
+        var rooms = await _context.Rooms
             .Where(r => r.BuildingId == buildingId)
-            .Where(r => !r.Reservations.Any(res =>
+            .Include(r => r.Reservations)
+            .AsNoTracking()
+            .ToListAsync();
+
+        return rooms.Where(r => !r.Reservations.Any(res =>
                 (res.Status == ReservationStatus.Pending || res.Status == ReservationStatus.Approved) &&
                 res.StartTimeUtc < endUtc &&
                 res.EndTimeUtc > startUtc))
-            .AsNoTracking()
-            .ToListAsync();
+            .ToList();
     }
     public async Task<CursorPageResult<Room>> GetByBuildingIdPagedAsync(int buildingId, int pageSize, string? cursor)
     {

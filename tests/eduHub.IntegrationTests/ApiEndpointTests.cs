@@ -130,6 +130,12 @@ public class ApiEndpointTests
 
         var response = await userClient.PostAsJsonAsync("/api/reservations", dto);
 
+        if (response.StatusCode != HttpStatusCode.Created)
+        {
+            var content = await response.Content.ReadAsStringAsync();
+            throw new Exception($"Failed to create reservation. Status: {response.StatusCode}, Content: {content}");
+        }
+
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
         var reservation = await response.Content.ReadFromJsonAsync<ReservationResponseDto>();

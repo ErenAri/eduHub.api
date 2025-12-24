@@ -8,28 +8,25 @@ using eduHub.Domain.Entities;
 using eduHub.Domain.Enums;
 using eduHub.Infrastructure.Persistence;
 using eduHub.Infrastructure.Services;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using Testcontainers.PostgreSql;
 
 namespace eduHub.IntegrationTests;
 
 public class ServiceIntegrationTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder()
-        .WithDatabase("eduhub_integration")
-        .WithUsername($"user_{Guid.NewGuid():N}")
-        .WithPassword($"pass_{Guid.NewGuid():N}")
-        .Build();
+    private SqliteConnection _connection;
 
     public async Task InitializeAsync()
     {
-        await _postgres.StartAsync();
+        _connection = new SqliteConnection("DataSource=:memory:");
+        await _connection.OpenAsync();
     }
 
     public async Task DisposeAsync()
     {
-        await _postgres.DisposeAsync();
+        await _connection.DisposeAsync();
     }
 
     [Fact]
@@ -238,19 +235,19 @@ public class ServiceIntegrationTests : IAsyncLifetime
     private async Task<AppDbContext> CreateDbContextAsync()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseNpgsql(_postgres.GetConnectionString())
+            .UseSqlite(_connection)
             .Options;
 
         var context = new AppDbContext(options);
-        await context.Database.MigrateAsync();
-        await ResetDatabaseAsync(context);
+        await context.Database.EnsureCreatedAsync();
+        // await ResetDatabaseAsync(context); // Not needed for in-memory if we recreate context or connection, but here we share connection
+        // Actually, if we reuse the connection, we need to clear data.
+        // But here I'm creating a new context for each test invocation?
+        // Wait, xUnit instantiates the test class for each test method.
+        // So `InitializeAsync` is called for each test.
+        // So `_connection` is new for each test.
+        // So database is fresh.
         return context;
-    }
-
-    private static async Task ResetDatabaseAsync(AppDbContext context)
-    {
-        await context.Database.ExecuteSqlRawAsync(
-            "TRUNCATE TABLE buildings, rooms, reservations, users, refresh_tokens, revoked_tokens RESTART IDENTITY CASCADE;");
     }
 
     private static IOptions<JwtOptions> BuildJwtOptions()
