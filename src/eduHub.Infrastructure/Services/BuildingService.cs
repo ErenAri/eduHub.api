@@ -52,7 +52,10 @@ public class BuildingService : IBuildingService
         if (entity == null)
             throw new KeyNotFoundException("Building not found.");
 
-        var hasRooms = await _context.Rooms.AnyAsync(r => r.BuildingId == id);
+        var hasRooms = await _context.Rooms
+            .IgnoreQueryFilters()
+            .AnyAsync(r => r.BuildingId == id);
+
         if (hasRooms)
             throw new ConflictException(
                 "Cannot delete building because it has rooms. Delete or move rooms first."
