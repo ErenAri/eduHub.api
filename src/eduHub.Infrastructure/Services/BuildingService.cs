@@ -62,7 +62,16 @@ public class BuildingService : IBuildingService
             );
 
         _context.Buildings.Remove(entity);
-        await _context.SaveChangesAsync();
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            throw new ConflictException(
+                "Cannot delete building because it has related data."
+            );
+        }
     }
     public async Task<CursorPageResult<Building>> GetPagedAsync(int pageSize, string? cursor)
     {
