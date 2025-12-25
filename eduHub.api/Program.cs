@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Microsoft.Extensions.Options;
@@ -424,7 +425,16 @@ else
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 app.UseHttpsRedirection();
-app.UseStaticFiles();
+var staticRoot = app.Environment.WebRootPath;
+if (string.IsNullOrWhiteSpace(staticRoot))
+{
+    staticRoot = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+}
+Directory.CreateDirectory(staticRoot);
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(staticRoot)
+});
 app.UseCors(corsPolicyName);
 
 app.UseAuthentication();
