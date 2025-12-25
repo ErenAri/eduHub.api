@@ -54,9 +54,17 @@ public class UserService : IUserService
         {
             await _context.SaveChangesAsync();
         }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: "23505" })
+        catch (DbUpdateException ex)
         {
-            throw new InvalidOperationException("Unable to register.");
+            // Check for Postgres unique constraint violation
+            if (ex.InnerException is PostgresException { SqlState: "23505" })
+                throw new InvalidOperationException("Unable to register.");
+
+            // Check for Sqlite unique constraint violation (Error code 19)
+            if (ex.InnerException is Microsoft.Data.Sqlite.SqliteException { SqliteErrorCode: 19 })
+                throw new InvalidOperationException("Unable to register.");
+
+            throw;
         }
 
         return new UserResponseDto
@@ -95,9 +103,14 @@ public class UserService : IUserService
         var refreshTokenHash = HashToken(refreshToken);
         var refreshExpiresAtUtc = now.AddDays(refreshDays);
 
-        var staleTokens = await _context.RefreshTokens
-            .Where(rt => rt.UserId == user.Id && (rt.ExpiresAtUtc <= now || rt.RevokedAtUtc != null))
+        // Fetch all tokens for user and filter in memory to avoid EF Core translation issues with DateTimeOffset on Sqlite
+        var allUserTokens = await _context.RefreshTokens
+            .Where(rt => rt.UserId == user.Id)
             .ToListAsync();
+
+        var staleTokens = allUserTokens
+            .Where(rt => rt.ExpiresAtUtc <= now || rt.RevokedAtUtc != null)
+            .ToList();
         if (staleTokens.Count > 0)
             _context.RefreshTokens.RemoveRange(staleTokens);
 

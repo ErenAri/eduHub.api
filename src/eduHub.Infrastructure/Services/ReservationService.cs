@@ -272,6 +272,7 @@ namespace eduHub.Infrastructure.Services
             if (endUtc <= startUtc)
                 throw new InvalidOperationException("End time must be after start time.");
 
+            // Split query to avoid EF Core translation issues with DateTimeOffset on Sqlite
             var query = _context.Reservations
                 .AsNoTracking()
                 .Where(r => r.RoomId == roomId &&
@@ -280,7 +281,9 @@ namespace eduHub.Infrastructure.Services
             if (excludeReservationId.HasValue)
                 query = query.Where(r => r.Id != excludeReservationId.Value);
 
-            var hasConflict = await query.AnyAsync(r =>
+            var reservations = await query.ToListAsync();
+
+            var hasConflict = reservations.Any(r =>
                 r.StartTimeUtc < endUtc &&
                 startUtc < r.EndTimeUtc);
 
