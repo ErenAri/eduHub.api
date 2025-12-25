@@ -2,6 +2,7 @@ using eduHub.Application.DTOs.Users;
 using eduHub.Application.Interfaces.Users;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using System.Security.Claims;
 
 namespace eduHub.api.Controllers;
@@ -14,23 +15,24 @@ public class UsersController : ApiControllerBase
     private const long MaxAvatarBytes = 2 * 1024 * 1024;
     private static readonly HashSet<string> AllowedAvatarTypes = new(StringComparer.OrdinalIgnoreCase)
     {
+        "image/jpg",
         "image/jpeg",
         "image/png"
     };
-    private static readonly HashSet<string> AllowedAvatarExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".jpg",
-        ".jpeg",
-        ".png"
-    };
+    private static readonly string[] AllowedAvatarExtensions = { ".jpg", ".png" };
 
     private readonly IUserService _userService;
     private readonly IWebHostEnvironment _environment;
+    private readonly IConfiguration _configuration;
 
-    public UsersController(IUserService userService, IWebHostEnvironment environment)
+    public UsersController(
+        IUserService userService,
+        IWebHostEnvironment environment,
+        IConfiguration configuration)
     {
         _userService = userService;
         _environment = environment;
+        _configuration = configuration;
     }
 
     [HttpGet("me")]
@@ -89,12 +91,20 @@ public class UsersController : ApiControllerBase
         if (avatar.Length > MaxAvatarBytes)
             return BadRequestProblem("Avatar file must be 2MB or smaller.");
 
-        if (!AllowedAvatarTypes.Contains(avatar.ContentType))
+        var normalizedContentType = NormalizeContentType(avatar.ContentType);
+        if (!string.IsNullOrWhiteSpace(normalizedContentType) &&
+            !AllowedAvatarTypes.Contains(normalizedContentType))
             return BadRequestProblem("Only JPG or PNG images are allowed.");
 
-        var extension = Path.GetExtension(avatar.FileName);
-        if (string.IsNullOrWhiteSpace(extension) || !AllowedAvatarExtensions.Contains(extension))
+        if (!TryGetImageExtension(avatar, out var extension))
             return BadRequestProblem("Only JPG or PNG images are allowed.");
+
+        if (!string.IsNullOrWhiteSpace(normalizedContentType))
+        {
+            var expectedType = extension == ".png" ? "image/png" : "image/jpeg";
+            if (!string.Equals(normalizedContentType, expectedType, StringComparison.OrdinalIgnoreCase))
+                return BadRequestProblem("Avatar file content does not match the declared type.");
+        }
 
         var webRoot = _environment.WebRootPath ?? Path.Combine(_environment.ContentRootPath, "wwwroot");
         var avatarDirectory = Path.Combine(webRoot, "uploads", "avatars");
@@ -103,13 +113,23 @@ public class UsersController : ApiControllerBase
         var fileName = $"user-{userId}{extension.ToLowerInvariant()}";
         var filePath = Path.Combine(avatarDirectory, fileName);
 
+        foreach (var allowedExtension in AllowedAvatarExtensions)
+        {
+            var existingPath = Path.Combine(avatarDirectory, $"user-{userId}{allowedExtension}");
+            if (!string.Equals(existingPath, filePath, StringComparison.OrdinalIgnoreCase) &&
+                System.IO.File.Exists(existingPath))
+            {
+                System.IO.File.Delete(existingPath);
+            }
+        }
+
         await using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None))
         {
             await avatar.CopyToAsync(stream);
         }
 
-        var baseUrl = $"{Request.Scheme}://{Request.Host}";
-        var avatarUrl = $"{baseUrl}/uploads/avatars/{fileName}";
+        var relativePath = $"/uploads/avatars/{fileName}";
+        var avatarUrl = BuildAvatarUrl(relativePath);
 
         var updatedUrl = await _userService.UpdateAvatarAsync(userId, avatarUrl);
         return Ok(new UserAvatarResponseDto { AvatarUrl = updatedUrl });
@@ -120,5 +140,88 @@ public class UsersController : ApiControllerBase
         userId = 0;
         var userIdValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return !string.IsNullOrWhiteSpace(userIdValue) && int.TryParse(userIdValue, out userId);
+    }
+
+    private string BuildAvatarUrl(string relativePath)
+    {
+        var baseUrl = _configuration.GetValue<string>("PublicBaseUrl");
+        if (!string.IsNullOrWhiteSpace(baseUrl) &&
+            Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUri))
+        {
+            return new Uri(baseUri, relativePath).ToString();
+        }
+
+        if (_environment.IsDevelopment() && Request.Host.HasValue)
+            return $"{Request.Scheme}://{Request.Host}{relativePath}";
+
+        return relativePath;
+    }
+
+    private static string NormalizeContentType(string contentType)
+    {
+        if (string.IsNullOrWhiteSpace(contentType))
+            return string.Empty;
+
+        return string.Equals(contentType, "image/jpg", StringComparison.OrdinalIgnoreCase)
+            ? "image/jpeg"
+            : contentType;
+    }
+
+    private static bool TryGetImageExtension(IFormFile file, out string extension)
+    {
+        extension = string.Empty;
+        Span<byte> header = stackalloc byte[8];
+        using var stream = file.OpenReadStream();
+        if (!TryReadHeader(stream, header))
+            return false;
+
+        if (IsPng(header))
+        {
+            extension = ".png";
+            return true;
+        }
+
+        if (IsJpeg(header))
+        {
+            extension = ".jpg";
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryReadHeader(Stream stream, Span<byte> buffer)
+    {
+        var totalRead = 0;
+        while (totalRead < buffer.Length)
+        {
+            var read = stream.Read(buffer.Slice(totalRead));
+            if (read == 0)
+                break;
+            totalRead += read;
+        }
+
+        return totalRead >= buffer.Length;
+    }
+
+    private static bool IsPng(ReadOnlySpan<byte> header)
+    {
+        return header.Length >= 8 &&
+               header[0] == 0x89 &&
+               header[1] == 0x50 &&
+               header[2] == 0x4E &&
+               header[3] == 0x47 &&
+               header[4] == 0x0D &&
+               header[5] == 0x0A &&
+               header[6] == 0x1A &&
+               header[7] == 0x0A;
+    }
+
+    private static bool IsJpeg(ReadOnlySpan<byte> header)
+    {
+        return header.Length >= 3 &&
+               header[0] == 0xFF &&
+               header[1] == 0xD8 &&
+               header[2] == 0xFF;
     }
 }

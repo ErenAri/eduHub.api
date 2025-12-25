@@ -46,6 +46,9 @@ param dbConnectionString string
 @minLength(1)
 param corsAllowedOrigins array
 
+@description('Public base URL used for generated links (optional).')
+param publicBaseUrl string = ''
+
 @description('Extra IP CIDR blocks allowed to reach the app (optional).')
 param allowedIpCidrs array = []
 
@@ -109,6 +112,10 @@ var baseAppSettings = [
   {
     name: 'ConnectionStrings__DefaultConnection'
     value: dbConnectionString
+  }
+  {
+    name: 'PublicBaseUrl'
+    value: publicBaseUrl
   }
   {
     name: 'Seed__Enabled'

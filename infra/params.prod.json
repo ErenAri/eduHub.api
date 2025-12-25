@@ -6,6 +6,7 @@
       "appName": { "value": "eh-api-prod" },
       "jwtKey": { "value": "<32+ bytes>" },
       "dbConnectionString": { "value": "<connection string>" },
+      "publicBaseUrl": { "value": "https://eh-api-prod.azurewebsites.net" },
       "corsAllowedOrigins": { "value": ["https://example.com"] },
       "frontDoorProfileName": { "value": "eh-fd-profile" },
       "frontDoorEndpointName": { "value": "eh-fd-endpoint" },

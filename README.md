@@ -57,6 +57,7 @@ Forwarded headers (choose one approach):
 
 Optional settings:
 - `Jwt:Issuer`, `Jwt:Audience`, `Jwt:AccessTokenMinutes`, `Jwt:RefreshTokenDays`.
+- `PublicBaseUrl` (absolute base URL used for generated links like avatars).
 - `OpenTelemetry:Otlp:Endpoint`, `OpenTelemetry:SamplingRatio`.
 - `TokenCleanup:*`, `RequestLogging:*`.
 - `Startup:AutoMigrate`, `Seed:*`.
@@ -65,6 +66,7 @@ Example environment variables:
 ```
 Jwt__Key=...32+bytes...
 ConnectionStrings__DefaultConnection=Host=...;Database=...;Username=...;Password=...;Ssl Mode=Require
+PublicBaseUrl=https://api.example.com
 Cors__AllowedOrigins__0=https://app.example.com
 ForwardedHeaders__KnownNetworks__0=10.0.0.0/8
 ForwardedHeaders__ForwardLimit=2

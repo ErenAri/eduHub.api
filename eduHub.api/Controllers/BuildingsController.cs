@@ -10,7 +10,7 @@ namespace eduHub.api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
+[Authorize]
 public class BuildingsController : ApiControllerBase
 {
     private readonly IBuildingService _buildingService;
@@ -68,6 +68,7 @@ public class BuildingsController : ApiControllerBase
 
     // POST api/Buildings
     [HttpPost]
+    [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
@@ -91,6 +92,7 @@ public class BuildingsController : ApiControllerBase
 
     // PUT api/Buildings/5
     [HttpPut("{id:int}")]
+    [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
@@ -119,6 +121,7 @@ public class BuildingsController : ApiControllerBase
 
     // DELETE api/Buildings/5
     [HttpDelete("{id:int}")]
+    [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
