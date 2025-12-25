@@ -126,6 +126,9 @@ public class AppDbContext : DbContext
                 .IsRequired()
                 .HasMaxLength(200);
 
+            entity.Property(u => u.AvatarUrl)
+                .HasMaxLength(500);
+
             entity.Property(u => u.PasswordHash)
                 .IsRequired();
 

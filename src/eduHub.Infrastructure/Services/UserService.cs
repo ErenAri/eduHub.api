@@ -1,5 +1,6 @@
 ﻿using eduHub.Application.DTOs.Users;
 using eduHub.Application.Interfaces.Users;
+using eduHub.Application.Common.Exceptions;
 using eduHub.Application.Security;
 using eduHub.Domain.Entities;
 using eduHub.Domain.Enums;
@@ -63,6 +64,7 @@ public class UserService : IUserService
             Id = user.Id,
             UserName = user.UserName,
             Email = user.Email,
+            AvatarUrl = user.AvatarUrl,
             Role = user.Role.ToString()
         };
     }
@@ -120,6 +122,7 @@ public class UserService : IUserService
                 Id = user.Id,
                 UserName = user.UserName,
                 Email = user.Email,
+                AvatarUrl = user.AvatarUrl,
                 Role = user.Role.ToString()
             }
         };
@@ -183,9 +186,89 @@ public class UserService : IUserService
                 Id = user.Id,
                 UserName = user.UserName,
                 Email = user.Email,
+                AvatarUrl = user.AvatarUrl,
                 Role = user.Role.ToString()
             }
         };
+    }
+
+    public async Task<UserResponseDto?> GetByIdAsync(int userId)
+    {
+        var user = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId);
+        if (user == null)
+            return null;
+
+        return new UserResponseDto
+        {
+            Id = user.Id,
+            UserName = user.UserName,
+            Email = user.Email,
+            AvatarUrl = user.AvatarUrl,
+            Role = user.Role.ToString()
+        };
+    }
+
+    public async Task<UserResponseDto> UpdateProfileAsync(int userId, UserProfileUpdateDto dto)
+    {
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user == null)
+            throw new KeyNotFoundException("User not found.");
+
+        var userName = dto.UserName.Trim();
+        var email = dto.Email.Trim();
+
+        var hasConflict = await _context.Users.AnyAsync(u =>
+            u.Id != userId && (u.UserName == userName || u.Email == email));
+
+        if (hasConflict)
+            throw new ConflictException("Username or email is already in use.");
+
+        user.UserName = userName;
+        user.Email = email;
+
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: "23505" })
+        {
+            throw new ConflictException("Username or email is already in use.");
+        }
+
+        return new UserResponseDto
+        {
+            Id = user.Id,
+            UserName = user.UserName,
+            Email = user.Email,
+            AvatarUrl = user.AvatarUrl,
+            Role = user.Role.ToString()
+        };
+    }
+
+    public async Task ChangePasswordAsync(int userId, UserChangePasswordDto dto)
+    {
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user == null)
+            throw new KeyNotFoundException("User not found.");
+
+        var valid = BCrypt.Net.BCrypt.Verify(dto.CurrentPassword, user.PasswordHash);
+        if (!valid)
+            throw new InvalidOperationException("Current password is incorrect.");
+
+        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
+        await _context.SaveChangesAsync();
+    }
+
+    public async Task<string> UpdateAvatarAsync(int userId, string avatarUrl)
+    {
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user == null)
+            throw new KeyNotFoundException("User not found.");
+
+        user.AvatarUrl = avatarUrl;
+        await _context.SaveChangesAsync();
+
+        return user.AvatarUrl ?? string.Empty;
     }
 
     public async Task RevokeTokenAsync(string jti, DateTimeOffset expiresAtUtc, int userId)

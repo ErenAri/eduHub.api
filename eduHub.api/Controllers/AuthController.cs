@@ -58,6 +58,27 @@ public class AuthController : ApiControllerBase
     }
 
     /// <summary>
+    /// Returns the authenticated user profile.
+    /// </summary>
+    [HttpGet("me")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<UserResponseDto>> Me()
+    {
+        var userIdValue = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrWhiteSpace(userIdValue) || !int.TryParse(userIdValue, out var userId))
+            return UnauthorizedProblem("Invalid token.");
+
+        var user = await _userService.GetByIdAsync(userId);
+        if (user == null)
+            return NotFoundProblem("User not found.");
+
+        return Ok(user);
+    }
+
+    /// <summary>
     /// Exchanges a refresh token for a new access token.
     /// </summary>
     [HttpPost("refresh")]

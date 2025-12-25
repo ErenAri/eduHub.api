@@ -424,6 +424,7 @@ else
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 app.UseHttpsRedirection();
+app.UseStaticFiles();
 app.UseCors(corsPolicyName);
 
 app.UseAuthentication();
