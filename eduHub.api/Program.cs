@@ -1,7 +1,10 @@
+using eduHub.api.Authorization;
 using eduHub.api.HostedServices;
 using eduHub.api.Middleware;
 using eduHub.api.Options;
+using eduHub.Application.Interfaces.Tenants;
 using eduHub.Application.Validators.Users;
+using eduHub.Domain.Enums;
 using eduHub.Infrastructure;
 using eduHub.Infrastructure.Persistence;
 using FluentValidation;
@@ -187,8 +190,16 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
             {
                 var userIdValue = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
                 var jti = context.Principal?.FindFirstValue(JwtRegisteredClaimNames.Jti);
+                var orgIdValue = context.Principal?.FindFirstValue(TenantClaimTypes.OrganizationId);
+                var orgRoleValue = context.Principal?.FindFirstValue(TenantClaimTypes.OrganizationRole);
 
-                if (string.IsNullOrWhiteSpace(userIdValue) || string.IsNullOrWhiteSpace(jti) || !int.TryParse(userIdValue, out var userId))
+                if (string.IsNullOrWhiteSpace(userIdValue) ||
+                    string.IsNullOrWhiteSpace(jti) ||
+                    string.IsNullOrWhiteSpace(orgIdValue) ||
+                    string.IsNullOrWhiteSpace(orgRoleValue) ||
+                    !int.TryParse(userIdValue, out var userId) ||
+                    !Guid.TryParse(orgIdValue, out var organizationId) ||
+                    !Enum.TryParse<OrganizationMemberRole>(orgRoleValue, true, out _))
                 {
                     context.Fail("Invalid token claims.");
                     return;
@@ -197,8 +208,15 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
                 var db = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
                 var userExists = await db.Users.AnyAsync(u => u.Id == userId);
                 var isRevoked = await db.RevokedTokens.AnyAsync(t => t.Jti == jti);
+                var membershipValid = await db.OrganizationMembers.AnyAsync(m =>
+                    m.OrganizationId == organizationId &&
+                    m.UserId == userId &&
+                    m.Status == OrganizationMemberStatus.Active);
+                var orgActive = await db.Organizations.AnyAsync(o =>
+                    o.Id == organizationId &&
+                    o.IsActive);
 
-                if (!userExists || isRevoked)
+                if (!userExists || isRevoked || !membershipValid || !orgActive)
                     context.Fail("Token is no longer valid.");
             }
         };
@@ -210,11 +228,33 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
 
 builder.Services.AddAuthorization(options =>
 {
-    options.AddPolicy(AuthorizationConstants.Policies.AdminOnly, policy => policy.RequireRole(AuthorizationConstants.Roles.Admin));
+    options.AddPolicy(AuthorizationConstants.Policies.PlatformAdmin, policy =>
+        policy.RequireClaim(TenantClaimTypes.IsPlatformAdmin, "true"));
+
+    options.AddPolicy(
+        AuthorizationConstants.Policies.OrgUser,
+        policy => policy.AddRequirements(new OrgRoleRequirement(
+            OrganizationMemberRole.User,
+            OrganizationMemberRole.Approver,
+            OrganizationMemberRole.OrgAdmin)));
+
+    options.AddPolicy(
+        AuthorizationConstants.Policies.OrgAdmin,
+        policy => policy.AddRequirements(new OrgRoleRequirement(
+            OrganizationMemberRole.OrgAdmin)));
+
+    options.AddPolicy(
+        AuthorizationConstants.Policies.Approver,
+        policy => policy.AddRequirements(new OrgRoleRequirement(
+            OrganizationMemberRole.Approver,
+            OrganizationMemberRole.OrgAdmin)));
+
     options.FallbackPolicy = new AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
         .Build();
 });
+
+builder.Services.AddScoped<IAuthorizationHandler, OrgRoleHandler>();
 
 var trustAllForwarders = builder.Configuration.GetValue("ForwardedHeaders:TrustAll", false);
 var ingressLockedDown = builder.Configuration.GetValue("ForwardedHeaders:IngressLockedDown", false);
@@ -229,7 +269,9 @@ if (builder.Environment.IsProduction() && !trustAllForwarders && requireKnownPro
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
-    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor |
+        ForwardedHeaders.XForwardedProto |
+        ForwardedHeaders.XForwardedHost;
     options.KnownProxies.Clear();
     options.KnownNetworks.Clear();
 
@@ -397,10 +439,11 @@ using (var scope = app.Services.CreateScope())
         }
 
         var seedEnabled = configuration.GetValue("Seed:Enabled", env.IsDevelopment());
-        if (seedEnabled)
-        {
-            await DbInitializer.SeedAsync(db, configuration, env);
-        }
+    if (seedEnabled)
+    {
+        var tenantSetter = services.GetRequiredService<ICurrentTenantSetter>();
+        await DbInitializer.SeedAsync(db, configuration, env, tenantSetter);
+    }
     }
 }
 
@@ -436,6 +479,7 @@ app.UseStaticFiles(new StaticFileOptions
     FileProvider = new PhysicalFileProvider(staticRoot)
 });
 app.UseCors(corsPolicyName);
+app.UseMiddleware<TenantResolutionMiddleware>();
 
 app.UseAuthentication();
 app.UseAuthorization();

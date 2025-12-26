@@ -1,5 +1,6 @@
 using eduHub.Application.DTOs.Users;
 using eduHub.Application.Interfaces.Users;
+using eduHub.Application.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
@@ -8,8 +9,8 @@ using System.Security.Claims;
 namespace eduHub.api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
-[Authorize]
+[Route("api/org/users")]
+[Authorize(Policy = AuthorizationConstants.Policies.OrgUser)]
 public class UsersController : ApiControllerBase
 {
     private const long MaxAvatarBytes = 2 * 1024 * 1024;
@@ -44,7 +45,10 @@ public class UsersController : ApiControllerBase
         if (!TryGetUserId(out var userId))
             return UnauthorizedProblem("Invalid token.");
 
-        var user = await _userService.GetByIdAsync(userId);
+        if (!TryGetOrganizationId(out var organizationId))
+            return UnauthorizedProblem("Invalid tenant context.");
+
+        var user = await _userService.GetByIdInOrgAsync(userId, organizationId);
         if (user == null)
             return NotFoundProblem("User not found.");
 
@@ -140,6 +144,13 @@ public class UsersController : ApiControllerBase
         userId = 0;
         var userIdValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return !string.IsNullOrWhiteSpace(userIdValue) && int.TryParse(userIdValue, out userId);
+    }
+
+    private bool TryGetOrganizationId(out Guid organizationId)
+    {
+        organizationId = Guid.Empty;
+        var orgIdValue = User.FindFirstValue(TenantClaimTypes.OrganizationId);
+        return !string.IsNullOrWhiteSpace(orgIdValue) && Guid.TryParse(orgIdValue, out organizationId);
     }
 
     private string BuildAvatarUrl(string relativePath)

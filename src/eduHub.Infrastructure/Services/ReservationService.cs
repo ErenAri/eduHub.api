@@ -1,4 +1,4 @@
-﻿using eduHub.Application.Common;
+using eduHub.Application.Common;
 using eduHub.Application.DTOs.Reservations;
 using eduHub.Application.Interfaces.Reservations;
 using eduHub.Domain.Entities;
@@ -18,10 +18,10 @@ namespace eduHub.Infrastructure.Services
             _context = context;
         }
 
-        public async Task<ReservationResponseDto?> GetByIdAsync(int id, int currentUserId, bool isAdmin)
+        public async Task<ReservationResponseDto?> GetByIdAsync(int id, int currentUserId, bool canViewAll)
         {
             var query = _context.Reservations.AsNoTracking().Where(r => r.Id == id);
-            if (!isAdmin)
+            if (!canViewAll)
                 query = query.Where(r => r.CreatedByUserId == currentUserId);
 
             var reservation = await query.FirstOrDefaultAsync();
@@ -29,7 +29,7 @@ namespace eduHub.Infrastructure.Services
                 return null;
 
             var dto = MapToDto(reservation);
-            if (!isAdmin)
+            if (!canViewAll)
                 dto.CreatedByUserId = null;
 
             return dto;
@@ -38,10 +38,10 @@ namespace eduHub.Infrastructure.Services
         public async Task<CursorPageResult<ReservationResponseDto>> SearchAsync(
             ReservationQueryParameters queryParams,
             int? currentUserId,
-            bool isAdmin)
+            bool canViewAll)
         {
-            if (!isAdmin && !currentUserId.HasValue)
-                throw new UnauthorizedAccessException("Admin access required.");
+            if (!canViewAll && !currentUserId.HasValue)
+                throw new UnauthorizedAccessException("Access required.");
 
             var pageSize = ClampPageSize(queryParams.PageSize);
 
@@ -69,7 +69,7 @@ namespace eduHub.Infrastructure.Services
                 query = query.Where(r => r.StartTimeUtc <= endUtc);
             }
 
-            if (!isAdmin && currentUserId.HasValue)
+            if (!canViewAll && currentUserId.HasValue)
                 query = query.Where(r => r.CreatedByUserId == currentUserId.Value);
 
             var sort = queryParams.Sort?.ToLowerInvariant();
@@ -110,7 +110,7 @@ namespace eduHub.Infrastructure.Services
                 : null;
 
             var dtos = reservations.Select(MapToDto).ToList();
-            if (!isAdmin)
+            if (!canViewAll)
             {
                 foreach (var dto in dtos)
                     dto.CreatedByUserId = null;
@@ -144,7 +144,7 @@ namespace eduHub.Infrastructure.Services
                 StartTimeUtc = startUtc,
                 EndTimeUtc = endUtc,
                 Purpose = dto.Purpose,
-                Status = ReservationStatus.Pending, // Default status, adjust as needed
+                Status = ReservationStatus.Pending,
                 CreatedByUserId = createdByUserId,
                 CreatedAtUtc = DateTimeOffset.UtcNow
             };
@@ -166,10 +166,10 @@ namespace eduHub.Infrastructure.Services
             int id,
             ReservationUpdateDto dto,
             int currentUserId,
-            bool isAdmin)
+            bool canManage)
         {
             var reservation = await _context.Reservations.FirstOrDefaultAsync(r =>
-                r.Id == id && (isAdmin || r.CreatedByUserId == currentUserId));
+                r.Id == id && (canManage || r.CreatedByUserId == currentUserId));
 
             if (reservation == null)
                 throw new KeyNotFoundException("Reservation not found.");
@@ -205,10 +205,10 @@ namespace eduHub.Infrastructure.Services
         public async Task<bool> DeleteAsync(
             int id,
             int currentUserId,
-            bool isAdmin)
+            bool canManage)
         {
             var reservation = await _context.Reservations.FirstOrDefaultAsync(r =>
-                r.Id == id && (isAdmin || r.CreatedByUserId == currentUserId));
+                r.Id == id && (canManage || r.CreatedByUserId == currentUserId));
 
             if (reservation == null)
                 return false;
@@ -219,10 +219,8 @@ namespace eduHub.Infrastructure.Services
             return true;
         }
 
-        public async Task<ReservationResponseDto> ApproveAsync(int id, bool isAdmin)
+        public async Task<ReservationResponseDto> ApproveAsync(int id, int approverUserId)
         {
-            if (!isAdmin)
-                throw new UnauthorizedAccessException("Forbidden.");
             var reservation = await _context.Reservations
                 .FirstOrDefaultAsync(r => r.Id == id);
 
@@ -238,13 +236,14 @@ namespace eduHub.Infrastructure.Services
             reservation.Status = ReservationStatus.Approved;
             await _context.SaveChangesAsync();
 
+            AddAuditLog("ReservationApproved", "Reservation", reservation.Id.ToString(), approverUserId, reservation.Purpose);
+            await _context.SaveChangesAsync();
+
             return MapToDto(reservation);
         }
 
-        public async Task<ReservationResponseDto> RejectAsync(int id, bool isAdmin)
+        public async Task<ReservationResponseDto> RejectAsync(int id, int approverUserId)
         {
-            if (!isAdmin)
-                throw new UnauthorizedAccessException("Forbidden.");
             var reservation = await _context.Reservations
                 .FirstOrDefaultAsync(r => r.Id == id);
 
@@ -258,6 +257,9 @@ namespace eduHub.Infrastructure.Services
                 throw new InvalidOperationException("Only pending reservations can be rejected.");
 
             reservation.Status = ReservationStatus.Rejected;
+            await _context.SaveChangesAsync();
+
+            AddAuditLog("ReservationRejected", "Reservation", reservation.Id.ToString(), approverUserId, reservation.Purpose);
             await _context.SaveChangesAsync();
 
             return MapToDto(reservation);
@@ -288,6 +290,19 @@ namespace eduHub.Infrastructure.Services
                 throw new InvalidOperationException("The room is already reserved in the given time range.");
         }
 
+        private void AddAuditLog(string action, string entityType, string entityId, int userId, string? summary)
+        {
+            _context.AuditLogs.Add(new AuditLog
+            {
+                Action = action,
+                EntityType = entityType,
+                EntityId = entityId,
+                Summary = summary,
+                CreatedByUserId = userId,
+                CreatedAtUtc = DateTimeOffset.UtcNow
+            });
+        }
+
         private static int ClampPageSize(int pageSize)
         {
             if (pageSize < 1) return 10;
@@ -304,7 +319,7 @@ namespace eduHub.Infrastructure.Services
                 Start = reservation.StartTimeUtc,
                 End = reservation.EndTimeUtc,
                 Purpose = reservation.Purpose,
-                Status = reservation.Status.ToString(), 
+                Status = reservation.Status.ToString(),
                 CreatedByUserId = reservation.CreatedByUserId,
                 CreatedAtUtc = reservation.CreatedAtUtc
             };

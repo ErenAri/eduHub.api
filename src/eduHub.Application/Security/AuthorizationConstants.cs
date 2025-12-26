@@ -4,12 +4,9 @@ public static class AuthorizationConstants
 {
     public static class Policies
     {
-        public const string AdminOnly = "AdminOnly";
-    }
-
-    public static class Roles
-    {
-        public const string Admin = "Admin";
-        public const string User = "User";
+        public const string PlatformAdmin = "PlatformAdmin";
+        public const string OrgAdmin = "OrgAdmin";
+        public const string Approver = "Approver";
+        public const string OrgUser = "OrgUser";
     }
 }

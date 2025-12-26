@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using eduHub.Application.Interfaces.Tenants;
 using eduHub.Domain.Entities;
 using eduHub.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -11,10 +12,14 @@ namespace eduHub.Infrastructure.Persistence;
 
 public static class DbInitializer
 {
+    private const string DefaultOrgName = "Default Organization";
+    private const string DefaultOrgSlug = "default";
+
     public static async Task SeedAsync(
         AppDbContext context,
         IConfiguration configuration,
-        IHostEnvironment env)
+        IHostEnvironment env,
+        ICurrentTenantSetter tenantSetter)
     {
         var seedEnabled = configuration.GetValue("Seed:Enabled", env.IsDevelopment());
         var seedAdmin = configuration.GetValue("Seed:Admin:Enabled", false);
@@ -24,21 +29,53 @@ public static class DbInitializer
         if (!seedEnabled)
             return;
 
+        var defaultOrg = await EnsureDefaultOrganizationAsync(context);
+
         if (seedAdmin)
         {
             var adminPassword = configuration["Seed:Admin:Password"];
-            await SeedAdminUserAsync(context, configuration, adminPassword);
+            await SeedAdminUserAsync(context, defaultOrg.Id, tenantSetter, configuration, adminPassword);
         }
 
         var seedSampleData = configuration.GetValue("Seed:SampleData:Enabled", env.IsDevelopment());
         if (seedSampleData)
         {
-            await SeedBuildingsAndRoomsAsync(context);
+            tenantSetter.SetTenant(defaultOrg.Id);
+            try
+            {
+                await SeedBuildingsAndRoomsAsync(context);
+            }
+            finally
+            {
+                tenantSetter.Clear();
+            }
         }
+    }
+
+    private static async Task<Organization> EnsureDefaultOrganizationAsync(AppDbContext context)
+    {
+        var org = await context.Organizations.FirstOrDefaultAsync(o => o.Slug == DefaultOrgSlug);
+        if (org != null)
+            return org;
+
+        org = new Organization
+        {
+            Id = Guid.NewGuid(),
+            Name = DefaultOrgName,
+            Slug = DefaultOrgSlug,
+            IsActive = true,
+            CreatedAtUtc = DateTimeOffset.UtcNow
+        };
+
+        context.Organizations.Add(org);
+        await context.SaveChangesAsync();
+        return org;
     }
 
     private static async Task SeedAdminUserAsync(
         AppDbContext context,
+        Guid organizationId,
+        ICurrentTenantSetter tenantSetter,
         IConfiguration configuration,
         string? adminPassword)
     {
@@ -76,6 +113,31 @@ public static class DbInitializer
 
         context.Users.Add(admin);
         await context.SaveChangesAsync();
+
+        tenantSetter.SetTenant(organizationId);
+        try
+        {
+            var membershipExists = await context.OrganizationMembers
+                .IgnoreQueryFilters()
+                .AnyAsync(m => m.OrganizationId == organizationId && m.UserId == admin.Id);
+            if (!membershipExists)
+            {
+                context.OrganizationMembers.Add(new OrganizationMember
+                {
+                    OrganizationId = organizationId,
+                    UserId = admin.Id,
+                    Role = OrganizationMemberRole.OrgAdmin,
+                    Status = OrganizationMemberStatus.Active,
+                    JoinedAtUtc = DateTimeOffset.UtcNow
+                });
+
+                await context.SaveChangesAsync();
+            }
+        }
+        finally
+        {
+            tenantSetter.Clear();
+        }
     }
 
     private static async Task SeedBuildingsAndRoomsAsync(AppDbContext context)

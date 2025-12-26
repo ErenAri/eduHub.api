@@ -1,4 +1,5 @@
-﻿using eduHub.Application.DTOs.Users;
+using eduHub.Application.DTOs.Organizations;
+using eduHub.Application.DTOs.Users;
 using eduHub.Application.Interfaces.Users;
 using eduHub.Application.Common.Exceptions;
 using eduHub.Application.Security;
@@ -13,7 +14,6 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-
 
 namespace eduHub.Infrastructure.Services;
 
@@ -31,7 +31,6 @@ public class UserService : IUserService
 
     public async Task<UserResponseDto> RegisterAsync(UserRegisterDto dto)
     {
-
         var exists = await _context.Users
             .AnyAsync(u => u.UserName == dto.UserName || u.Email == dto.Email);
 
@@ -59,17 +58,10 @@ public class UserService : IUserService
             throw new InvalidOperationException("Unable to register.");
         }
 
-        return new UserResponseDto
-        {
-            Id = user.Id,
-            UserName = user.UserName,
-            Email = user.Email,
-            AvatarUrl = user.AvatarUrl,
-            Role = user.Role.ToString()
-        };
+        return MapUser(user);
     }
 
-    public async Task<AuthResponseDto?> LoginAsync(UserLoginDto dto)
+    public async Task<AuthResponseDto?> LoginAsync(UserLoginDto dto, Guid organizationId)
     {
         var user = await _context.Users
             .FirstOrDefaultAsync(u =>
@@ -86,51 +78,22 @@ public class UserService : IUserService
         if (!valid)
             return null;
 
-        var accessToken = GenerateJwtToken(user, out var expiresAtUtc, out _);  
+        if (!await IsOrganizationActiveAsync(organizationId))
+            return null;
 
-        var now = DateTimeOffset.UtcNow;
-        var refreshDays = _jwtOptions.RefreshTokenDays;
+        var membership = await GetActiveMembershipAsync(user.Id, organizationId);
+        if (membership == null)
+            return null;
 
-        var refreshToken = GenerateSecureToken();
-        var refreshTokenHash = HashToken(refreshToken);
-        var refreshExpiresAtUtc = now.AddDays(refreshDays);
-
-        var staleTokens = await _context.RefreshTokens
-            .Where(rt => rt.UserId == user.Id && (rt.ExpiresAtUtc <= now || rt.RevokedAtUtc != null))
-            .ToListAsync();
-        if (staleTokens.Count > 0)
-            _context.RefreshTokens.RemoveRange(staleTokens);
-
-        _context.RefreshTokens.Add(new RefreshToken
-        {
-            UserId = user.Id,
-            TokenHash = refreshTokenHash,
-            CreatedAtUtc = now,
-            ExpiresAtUtc = refreshExpiresAtUtc
-        });
-
-        await _context.SaveChangesAsync();
-
-        return new AuthResponseDto
-        {
-            AccessToken = accessToken,
-            ExpiresAtUtc = expiresAtUtc,
-            RefreshToken = refreshToken,
-            RefreshTokenExpiresAtUtc = refreshExpiresAtUtc,
-            User = new UserResponseDto
-            {
-                Id = user.Id,
-                UserName = user.UserName,
-                Email = user.Email,
-                AvatarUrl = user.AvatarUrl,
-                Role = user.Role.ToString()
-            }
-        };
+        return await IssueTokensAsync(user, organizationId, membership.Role);
     }
 
-    public async Task<AuthResponseDto?> RefreshAsync(RefreshRequestDto dto)
+    public async Task<AuthResponseDto?> RefreshAsync(RefreshRequestDto dto, Guid organizationId)
     {
         if (string.IsNullOrWhiteSpace(dto.RefreshToken))
+            return null;
+
+        if (!await IsOrganizationActiveAsync(organizationId))
             return null;
 
         var now = DateTimeOffset.UtcNow;
@@ -155,41 +118,101 @@ public class UserService : IUserService
         if (user == null)
             return null;
 
+        var membership = await GetActiveMembershipAsync(user.Id, organizationId);
+        if (membership == null)
+            return null;
+
         storedToken.RevokedAtUtc = now;
 
-        var accessToken = GenerateJwtToken(user, out var accessExpiresAtUtc, out _);
+        return await IssueTokensAsync(user, organizationId, membership.Role, now);
+    }
 
-        var refreshDays = _jwtOptions.RefreshTokenDays;
+    public async Task<AuthResponseDto> RedeemInviteAsync(OrganizationInviteRedeemDto dto, Guid organizationId)
+    {
+        var token = dto.Token?.Trim();
+        if (string.IsNullOrWhiteSpace(token))
+            throw new InvalidOperationException("Invite token is required.");
 
-        var newRefreshToken = GenerateSecureToken();
-        var newRefreshHash = HashToken(newRefreshToken);
-        var refreshExpiresAtUtc = now.AddDays(refreshDays);
+        if (string.IsNullOrWhiteSpace(dto.Password))
+            throw new InvalidOperationException("Password is required.");
 
-        _context.RefreshTokens.Add(new RefreshToken
+        if (!await IsOrganizationActiveAsync(organizationId))
+            throw new InvalidOperationException("Organization is not active.");
+
+        var tokenHash = HashToken(token);
+        var invite = await _context.OrganizationInvites
+            .FirstOrDefaultAsync(i => i.OrganizationId == organizationId && i.TokenHash == tokenHash);
+
+        if (invite == null)
+            throw new InvalidOperationException("Invite not found.");
+
+        if (invite.RevokedAtUtc != null)
+            throw new InvalidOperationException("Invite has been revoked.");
+
+        if (invite.UsedAtUtc != null)
+            throw new InvalidOperationException("Invite has already been used.");
+
+        if (invite.ExpiresAtUtc <= DateTimeOffset.UtcNow)
+            throw new InvalidOperationException("Invite has expired.");
+
+        var email = invite.Email.Trim();
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == email);
+
+        if (user == null)
         {
-            UserId = user.Id,
-            TokenHash = newRefreshHash,
-            CreatedAtUtc = now,
-            ExpiresAtUtc = refreshExpiresAtUtc
-        });
+            var userName = string.IsNullOrWhiteSpace(dto.UserName) ? email : dto.UserName.Trim();
+            var passwordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password);
+
+            user = new User
+            {
+                UserName = userName,
+                Email = email,
+                PasswordHash = passwordHash,
+                Role = UserRole.User,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+
+            _context.Users.Add(user);
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: "23505" })
+            {
+                throw new InvalidOperationException("Unable to create user.");
+            }
+        }
+
+        var existingMembership = await _context.OrganizationMembers
+            .FirstOrDefaultAsync(m => m.OrganizationId == organizationId && m.UserId == user.Id);
+
+        if (existingMembership != null && existingMembership.Status == OrganizationMemberStatus.Active)
+            throw new InvalidOperationException("User is already a member of this organization.");
+
+        if (existingMembership == null)
+        {
+            _context.OrganizationMembers.Add(new OrganizationMember
+            {
+                OrganizationId = organizationId,
+                UserId = user.Id,
+                Role = invite.Role,
+                Status = OrganizationMemberStatus.Active,
+                JoinedAtUtc = DateTimeOffset.UtcNow
+            });
+        }
+        else
+        {
+            existingMembership.Role = invite.Role;
+            existingMembership.Status = OrganizationMemberStatus.Active;
+            existingMembership.JoinedAtUtc = DateTimeOffset.UtcNow;
+        }
+
+        invite.UsedAtUtc = DateTimeOffset.UtcNow;
+        invite.UsedByUserId = user.Id;
 
         await _context.SaveChangesAsync();
 
-        return new AuthResponseDto
-        {
-            AccessToken = accessToken,
-            ExpiresAtUtc = accessExpiresAtUtc,
-            RefreshToken = newRefreshToken,
-            RefreshTokenExpiresAtUtc = refreshExpiresAtUtc,
-            User = new UserResponseDto
-            {
-                Id = user.Id,
-                UserName = user.UserName,
-                Email = user.Email,
-                AvatarUrl = user.AvatarUrl,
-                Role = user.Role.ToString()
-            }
-        };
+        return await IssueTokensAsync(user, organizationId, invite.Role);
     }
 
     public async Task<UserResponseDto?> GetByIdAsync(int userId)
@@ -198,14 +221,20 @@ public class UserService : IUserService
         if (user == null)
             return null;
 
-        return new UserResponseDto
-        {
-            Id = user.Id,
-            UserName = user.UserName,
-            Email = user.Email,
-            AvatarUrl = user.AvatarUrl,
-            Role = user.Role.ToString()
-        };
+        return MapUser(user);
+    }
+
+    public async Task<UserResponseDto?> GetByIdInOrgAsync(int userId, Guid organizationId)
+    {
+        var user = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId);
+        if (user == null)
+            return null;
+
+        var membership = await GetActiveMembershipAsync(userId, organizationId);
+        if (membership == null)
+            return null;
+
+        return MapUser(user, membership.Role);
     }
 
     public async Task<UserResponseDto> UpdateProfileAsync(int userId, UserProfileUpdateDto dto)
@@ -235,14 +264,7 @@ public class UserService : IUserService
             throw new ConflictException("Username or email is already in use.");
         }
 
-        return new UserResponseDto
-        {
-            Id = user.Id,
-            UserName = user.UserName,
-            Email = user.Email,
-            AvatarUrl = user.AvatarUrl,
-            Role = user.Role.ToString()
-        };
+        return MapUser(user);
     }
 
     public async Task ChangePasswordAsync(int userId, UserChangePasswordDto dto)
@@ -296,6 +318,47 @@ public class UserService : IUserService
         return RevokeRefreshTokensAsync(userId, DateTimeOffset.UtcNow);
     }
 
+    private async Task<AuthResponseDto> IssueTokensAsync(
+        User user,
+        Guid organizationId,
+        OrganizationMemberRole orgRole,
+        DateTimeOffset? nowOverride = null)
+    {
+        var accessToken = GenerateJwtToken(user, organizationId, orgRole, out var expiresAtUtc, out _);
+
+        var now = nowOverride ?? DateTimeOffset.UtcNow;
+        var refreshDays = _jwtOptions.RefreshTokenDays;
+
+        var refreshToken = GenerateSecureToken();
+        var refreshTokenHash = HashToken(refreshToken);
+        var refreshExpiresAtUtc = now.AddDays(refreshDays);
+
+        var staleTokens = await _context.RefreshTokens
+            .Where(rt => rt.UserId == user.Id && (rt.ExpiresAtUtc <= now || rt.RevokedAtUtc != null))
+            .ToListAsync();
+        if (staleTokens.Count > 0)
+            _context.RefreshTokens.RemoveRange(staleTokens);
+
+        _context.RefreshTokens.Add(new RefreshToken
+        {
+            UserId = user.Id,
+            TokenHash = refreshTokenHash,
+            CreatedAtUtc = now,
+            ExpiresAtUtc = refreshExpiresAtUtc
+        });
+
+        await _context.SaveChangesAsync();
+
+        return new AuthResponseDto
+        {
+            AccessToken = accessToken,
+            ExpiresAtUtc = expiresAtUtc,
+            RefreshToken = refreshToken,
+            RefreshTokenExpiresAtUtc = refreshExpiresAtUtc,
+            User = MapUser(user, orgRole)
+        };
+    }
+
     private async Task RevokeRefreshTokensAsync(int userId, DateTimeOffset revokedAtUtc)
     {
         var tokens = await _context.RefreshTokens
@@ -309,6 +372,23 @@ public class UserService : IUserService
             token.RevokedAtUtc = revokedAtUtc;
 
         await _context.SaveChangesAsync();
+    }
+
+    private async Task<OrganizationMember?> GetActiveMembershipAsync(int userId, Guid organizationId)
+    {
+        return await _context.OrganizationMembers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(m =>
+                m.OrganizationId == organizationId &&
+                m.UserId == userId &&
+                m.Status == OrganizationMemberStatus.Active);
+    }
+
+    private async Task<bool> IsOrganizationActiveAsync(Guid organizationId)
+    {
+        return await _context.Organizations
+            .AsNoTracking()
+            .AnyAsync(o => o.Id == organizationId && o.IsActive);
     }
 
     private static string GenerateSecureToken(int byteLength = 64)
@@ -325,7 +405,12 @@ public class UserService : IUserService
         return Convert.ToHexString(hash);
     }
 
-    private string GenerateJwtToken(User user, out DateTimeOffset expiresAtUtc, out string jti)
+    private string GenerateJwtToken(
+        User user,
+        Guid organizationId,
+        OrganizationMemberRole orgRole,
+        out DateTimeOffset expiresAtUtc,
+        out string jti)
     {
         var key = _jwtOptions.Key;
         var issuer = _jwtOptions.Issuer;
@@ -339,8 +424,13 @@ public class UserService : IUserService
             new(JwtRegisteredClaimNames.UniqueName, user.UserName),
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(ClaimTypes.Name, user.UserName),
-            new(ClaimTypes.Role, user.Role.ToString())
+            new(ClaimTypes.Role, user.Role.ToString()),
+            new(TenantClaimTypes.OrganizationId, organizationId.ToString()),
+            new(TenantClaimTypes.OrganizationRole, orgRole.ToString())
         };
+
+        if (user.Role == UserRole.Admin)
+            claims.Add(new Claim(TenantClaimTypes.IsPlatformAdmin, "true"));
 
         var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
         var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
@@ -358,5 +448,17 @@ public class UserService : IUserService
             signingCredentials: credentials);
 
         return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    private static UserResponseDto MapUser(User user, OrganizationMemberRole? orgRole = null)
+    {
+        return new UserResponseDto
+        {
+            Id = user.Id,
+            UserName = user.UserName,
+            Email = user.Email,
+            AvatarUrl = user.AvatarUrl,
+            Role = (orgRole?.ToString() ?? user.Role.ToString())
+        };
     }
 }

@@ -1,17 +1,15 @@
-﻿using eduHub.Application.Common;
+using eduHub.Application.Common;
 using eduHub.Application.Interfaces.Rooms;
 using eduHub.Domain.Entities;
 using eduHub.Domain.Enums;
 using eduHub.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
-using System;
 
 namespace eduHub.Infrastructure.Services;
 
 public class RoomService : IRoomService
 {
     private readonly AppDbContext _context;
-
     public RoomService(AppDbContext context)
     {
         _context = context;
@@ -34,34 +32,46 @@ public class RoomService : IRoomService
             .FirstOrDefaultAsync(r => r.Id == id);
     }
 
-    public async Task<Room> CreateAsync(Room room)
+    public async Task<Room> CreateAsync(Room room, int createdByUserId)
     {
         _context.Rooms.Add(room);
         await _context.SaveChangesAsync();
+
+        AddAuditLog("RoomCreated", "Room", room.Id.ToString(), createdByUserId, room.Name);
+        await _context.SaveChangesAsync();
+
         return room;
     }
 
-    public async Task<Room> UpdateAsync(Room room)
+    public async Task<Room> UpdateAsync(Room room, int updatedByUserId)
     {
         _context.Rooms.Update(room);
         await _context.SaveChangesAsync();
+
+        AddAuditLog("RoomUpdated", "Room", room.Id.ToString(), updatedByUserId, room.Name);
+        await _context.SaveChangesAsync();
+
         return room;
     }
 
-    public async Task<bool> DeleteAsync(int id)
+    public async Task<bool> DeleteAsync(int id, int deletedByUserId)
     {
         var entity = await _context.Rooms.FirstOrDefaultAsync(r => r.Id == id);
         if (entity == null) return false;
 
         entity.IsDeleted = true;
         await _context.SaveChangesAsync();
+
+        AddAuditLog("RoomDeleted", "Room", entity.Id.ToString(), deletedByUserId, entity.Name);
+        await _context.SaveChangesAsync();
+
         return true;
     }
 
     public async Task<List<Room>> GetAvailableRoomsAsync(
-      int buildingId,
-      DateTimeOffset startTimeUtc,
-      DateTimeOffset endTimeUtc)
+        int buildingId,
+        DateTimeOffset startTimeUtc,
+        DateTimeOffset endTimeUtc)
     {
         var startUtc = startTimeUtc.ToUniversalTime();
         var endUtc = endTimeUtc.ToUniversalTime();
@@ -75,6 +85,7 @@ public class RoomService : IRoomService
             .AsNoTracking()
             .ToListAsync();
     }
+
     public async Task<CursorPageResult<Room>> GetByBuildingIdPagedAsync(int buildingId, int pageSize, string? cursor)
     {
         pageSize = ClampPageSize(pageSize);
@@ -114,6 +125,19 @@ public class RoomService : IRoomService
             NextCursor = nextCursor,
             HasMore = hasMore
         };
+    }
+
+    private void AddAuditLog(string action, string entityType, string entityId, int userId, string? summary)
+    {
+        _context.AuditLogs.Add(new AuditLog
+        {
+            Action = action,
+            EntityType = entityType,
+            EntityId = entityId,
+            Summary = summary,
+            CreatedByUserId = userId,
+            CreatedAtUtc = DateTimeOffset.UtcNow
+        });
     }
 
     private static int ClampPageSize(int pageSize)

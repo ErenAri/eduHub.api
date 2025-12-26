@@ -1,22 +1,24 @@
-﻿using eduHub.Application.Common;
+using eduHub.Application.Common;
+using eduHub.Application.Common.Exceptions;
 using eduHub.Application.Interfaces.Buildings;
-using System;
+using eduHub.Application.Interfaces.Tenants;
 using eduHub.Domain.Entities;
 using eduHub.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
-using eduHub.Application.Common.Exceptions;
-
 
 namespace eduHub.Infrastructure.Services;
 
 public class BuildingService : IBuildingService
 {
     private readonly AppDbContext _context;
+    private readonly ICurrentTenant _tenant;
 
-    public BuildingService(AppDbContext context)
+    public BuildingService(AppDbContext context, ICurrentTenant tenant)
     {
         _context = context;
+        _tenant = tenant;
     }
+
     public async Task<List<Building>> GetAllAsync()
     {
         return await _context.Buildings
@@ -31,48 +33,55 @@ public class BuildingService : IBuildingService
             .FirstOrDefaultAsync(b => b.Id == id);
     }
 
-    public async Task<Building> CreateAsync(Building building)
+    public async Task<Building> CreateAsync(Building building, int createdByUserId)
     {
         _context.Buildings.Add(building);
         await _context.SaveChangesAsync();
+
+        AddAuditLog("BuildingCreated", "Building", building.Id.ToString(), createdByUserId, building.Name);
+        await _context.SaveChangesAsync();
+
         return building;
     }
 
-    public async Task<Building> UpdateAsync(Building building)
+    public async Task<Building> UpdateAsync(Building building, int updatedByUserId)
     {
         _context.Buildings.Update(building);
         await _context.SaveChangesAsync();
+
+        AddAuditLog("BuildingUpdated", "Building", building.Id.ToString(), updatedByUserId, building.Name);
+        await _context.SaveChangesAsync();
+
         return building;
     }
 
-    public async Task DeleteAsync(int id)
+    public async Task DeleteAsync(int id, int deletedByUserId)
     {
         var entity = await _context.Buildings.FirstOrDefaultAsync(b => b.Id == id);
 
         if (entity == null)
             throw new KeyNotFoundException("Building not found.");
 
+        var organizationId = _tenant.OrganizationId;
+        if (!organizationId.HasValue)
+            throw new InvalidOperationException("Tenant context is missing.");
+
         var hasRooms = await _context.Rooms
             .IgnoreQueryFilters()
-            .AnyAsync(r => r.BuildingId == id);
+            .AnyAsync(r => r.BuildingId == id && r.OrganizationId == organizationId.Value);
 
         if (hasRooms)
             throw new ConflictException(
                 "Cannot delete building because it has rooms. Delete or move rooms first."
             );
 
-        _context.Buildings.Remove(entity);
-        try
-        {
-            await _context.SaveChangesAsync();
-        }
-        catch (DbUpdateException)
-        {
-            throw new ConflictException(
-                "Cannot delete building because it has related data."
-            );
-        }
+        entity.IsDeleted = true;
+        await _context.SaveChangesAsync();
+
+        AddAuditLog("BuildingDeleted", "Building", entity.Id.ToString(), deletedByUserId, entity.Name);
+        await _context.SaveChangesAsync();
     }
+
     public async Task<CursorPageResult<Building>> GetPagedAsync(int pageSize, string? cursor)
     {
         pageSize = ClampPageSize(pageSize);
@@ -111,6 +120,19 @@ public class BuildingService : IBuildingService
             NextCursor = nextCursor,
             HasMore = hasMore
         };
+    }
+
+    private void AddAuditLog(string action, string entityType, string entityId, int userId, string? summary)
+    {
+        _context.AuditLogs.Add(new AuditLog
+        {
+            Action = action,
+            EntityType = entityType,
+            EntityId = entityId,
+            Summary = summary,
+            CreatedByUserId = userId,
+            CreatedAtUtc = DateTimeOffset.UtcNow
+        });
     }
 
     private static int ClampPageSize(int pageSize)

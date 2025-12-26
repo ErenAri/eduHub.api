@@ -1,17 +1,17 @@
-﻿using eduHub.Application.Common;
+using System.Security.Claims;
+using eduHub.Application.Common;
 using eduHub.Application.DTOs.Rooms;
 using eduHub.Application.Interfaces.Rooms;
 using eduHub.Application.Security;
 using eduHub.Domain.Entities;
-using eduHub.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace eduHub.api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
-[Authorize]
+[Route("api/org/rooms")]
+[Authorize(Policy = AuthorizationConstants.Policies.OrgUser)]
 public class RoomsController : ApiControllerBase
 {
     private readonly IRoomService _roomService;
@@ -21,9 +21,6 @@ public class RoomsController : ApiControllerBase
         _roomService = roomService;
     }
 
-    /// <summary>
-    /// Returns a paginated list of rooms for the specified building.
-    /// </summary>
     [HttpGet("by-building/{buildingId:int}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult<CursorPageResponse<RoomResponseDto>>> GetRoomsByBuilding(
@@ -51,9 +48,6 @@ public class RoomsController : ApiControllerBase
         return Ok(response);
     }
 
-    /// <summary>
-    /// Returns a single room by its identifier.
-    /// </summary>
     [HttpGet("{id:int}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
@@ -75,11 +69,8 @@ public class RoomsController : ApiControllerBase
         return Ok(response);
     }
 
-    /// <summary>
-    /// Creates a new room.
-    /// </summary>
     [HttpPost]
-    [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
+    [Authorize(Policy = AuthorizationConstants.Policies.OrgAdmin)]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<RoomResponseDto>> CreateRoom([FromBody] RoomCreateDto dto)
@@ -92,7 +83,7 @@ public class RoomsController : ApiControllerBase
             BuildingId = dto.BuildingId
         };
 
-        var created = await _roomService.CreateAsync(room);
+        var created = await _roomService.CreateAsync(room, GetCurrentUserId());
 
         var response = new RoomResponseDto
         {
@@ -106,11 +97,8 @@ public class RoomsController : ApiControllerBase
         return CreatedAtAction(nameof(GetRoomById), new { id = response.Id }, response);
     }
 
-    /// <summary>
-    /// Updates an existing room.
-    /// </summary>
     [HttpPut("{id:int}")]
-    [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
+    [Authorize(Policy = AuthorizationConstants.Policies.OrgAdmin)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
@@ -127,7 +115,7 @@ public class RoomsController : ApiControllerBase
         room.Name = dto.Name;
         room.Capacity = dto.Capacity;
 
-        var updated = await _roomService.UpdateAsync(room);
+        var updated = await _roomService.UpdateAsync(room, GetCurrentUserId());
 
         var response = new RoomResponseDto
         {
@@ -141,11 +129,8 @@ public class RoomsController : ApiControllerBase
         return Ok(response);
     }
 
-    /// <summary>
-    /// Deletes a room.
-    /// </summary>
     [HttpDelete("{id:int}")]
-    [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
+    [Authorize(Policy = AuthorizationConstants.Policies.OrgAdmin)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteRoom(int id)
@@ -154,13 +139,10 @@ public class RoomsController : ApiControllerBase
         if (room == null)
             return NotFoundProblem();
 
-        await _roomService.DeleteAsync(id);
+        await _roomService.DeleteAsync(id, GetCurrentUserId());
         return NoContent();
     }
 
-    /// <summary>
-    /// Returns available rooms in a building for the given time range.
-    /// </summary>
     [HttpGet("available")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
@@ -187,5 +169,14 @@ public class RoomsController : ApiControllerBase
         });
 
         return Ok(response);
+    }
+
+    private int GetCurrentUserId()
+    {
+        var idClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrWhiteSpace(idClaim) || !int.TryParse(idClaim, out var userId))
+            throw new UnauthorizedAccessException("User id claim is missing.");
+
+        return userId;
     }
 }

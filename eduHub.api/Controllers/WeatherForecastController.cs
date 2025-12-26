@@ -6,7 +6,7 @@ namespace eduHub.api.Controllers
 {
     [ApiController]
     [Route("[controller]")]
-    [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
+    [Authorize(Policy = AuthorizationConstants.Policies.PlatformAdmin)]
     public class WeatherForecastController : ControllerBase
     {
         private static readonly string[] Summaries =

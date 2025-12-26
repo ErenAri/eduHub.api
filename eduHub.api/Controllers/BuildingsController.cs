@@ -1,4 +1,5 @@
-﻿using eduHub.Application.Common;
+using System.Security.Claims;
+using eduHub.Application.Common;
 using eduHub.Application.DTOs.Buildings;
 using eduHub.Application.Interfaces.Buildings;
 using eduHub.Application.Security;
@@ -9,8 +10,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace eduHub.api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
-[Authorize]
+[Route("api/org/buildings")]
+[Authorize(Policy = AuthorizationConstants.Policies.OrgUser)]
 public class BuildingsController : ApiControllerBase
 {
     private readonly IBuildingService _buildingService;
@@ -20,11 +21,9 @@ public class BuildingsController : ApiControllerBase
         _buildingService = buildingService;
     }
 
-    // GET api/Buildings?page=&pageSize=
     [HttpGet]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-
     public async Task<ActionResult<CursorPageResponse<BuildingResponseDto>>> GetBuildings(
         [FromQuery] int pageSize = 20,
         [FromQuery] string? cursor = null)
@@ -46,7 +45,6 @@ public class BuildingsController : ApiControllerBase
         return Ok(response);
     }
 
-    // GET api/Buildings/5
     [HttpGet("{id:int}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
@@ -66,9 +64,8 @@ public class BuildingsController : ApiControllerBase
         return Ok(response);
     }
 
-    // POST api/Buildings
     [HttpPost]
-    [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
+    [Authorize(Policy = AuthorizationConstants.Policies.OrgAdmin)]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
@@ -79,7 +76,7 @@ public class BuildingsController : ApiControllerBase
             Name = dto.Name
         };
 
-        var created = await _buildingService.CreateAsync(building);
+        var created = await _buildingService.CreateAsync(building, GetCurrentUserId());
 
         var response = new BuildingResponseDto
         {
@@ -90,9 +87,8 @@ public class BuildingsController : ApiControllerBase
         return CreatedAtAction(nameof(GetBuildingById), new { id = response.Id }, response);
     }
 
-    // PUT api/Buildings/5
     [HttpPut("{id:int}")]
-    [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
+    [Authorize(Policy = AuthorizationConstants.Policies.OrgAdmin)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
@@ -108,7 +104,7 @@ public class BuildingsController : ApiControllerBase
 
         building.Name = dto.Name;
 
-        var updated = await _buildingService.UpdateAsync(building);
+        var updated = await _buildingService.UpdateAsync(building, GetCurrentUserId());
 
         var response = new BuildingResponseDto
         {
@@ -119,9 +115,8 @@ public class BuildingsController : ApiControllerBase
         return Ok(response);
     }
 
-    // DELETE api/Buildings/5
     [HttpDelete("{id:int}")]
-    [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
+    [Authorize(Policy = AuthorizationConstants.Policies.OrgAdmin)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
@@ -131,7 +126,16 @@ public class BuildingsController : ApiControllerBase
         if (building == null)
             return NotFoundProblem();
 
-        await _buildingService.DeleteAsync(id);
+        await _buildingService.DeleteAsync(id, GetCurrentUserId());
         return NoContent();
+    }
+
+    private int GetCurrentUserId()
+    {
+        var idClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrWhiteSpace(idClaim) || !int.TryParse(idClaim, out var userId))
+            throw new UnauthorizedAccessException("User id claim is missing.");
+
+        return userId;
     }
 }

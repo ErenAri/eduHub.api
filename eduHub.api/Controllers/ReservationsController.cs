@@ -3,14 +3,15 @@ using eduHub.Application.Common;
 using eduHub.Application.DTOs.Reservations;
 using eduHub.Application.Interfaces.Reservations;
 using eduHub.Application.Security;
+using eduHub.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace eduHub.api.Controllers
 {
     [ApiController]
-    [Route("api/[controller]")]
-    [Authorize]
+    [Route("api/org/reservations")]
+    [Authorize(Policy = AuthorizationConstants.Policies.OrgUser)]
     public class ReservationsController : ApiControllerBase
     {
         private readonly IReservationService _reservationService;
@@ -24,8 +25,8 @@ namespace eduHub.api.Controllers
         public async Task<ActionResult<ReservationResponseDto>> GetById(int id)
         {
             var userId = GetCurrentUserId();
-            var isAdmin = IsCurrentUserAdmin();
-            var reservation = await _reservationService.GetByIdAsync(id, userId, isAdmin);
+            var canViewAll = HasOrgRole(OrganizationMemberRole.OrgAdmin, OrganizationMemberRole.Approver);
+            var reservation = await _reservationService.GetByIdAsync(id, userId, canViewAll);
             if (reservation == null)
                 return NotFoundProblem();
 
@@ -33,12 +34,11 @@ namespace eduHub.api.Controllers
         }
 
         [HttpGet("search")]
-        [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
+        [Authorize(Policy = AuthorizationConstants.Policies.Approver)]
         public async Task<ActionResult<CursorPageResponse<ReservationResponseDto>>> Search(
             [FromQuery] ReservationQueryParameters query)
         {
-            var isAdmin = IsCurrentUserAdmin();
-            var result = await _reservationService.SearchAsync(query, currentUserId: null, isAdmin: isAdmin);
+            var result = await _reservationService.SearchAsync(query, currentUserId: null, canViewAll: true);
             return Ok(ToResponse(result));
         }
 
@@ -47,18 +47,17 @@ namespace eduHub.api.Controllers
             [FromQuery] ReservationQueryParameters query)
         {
             var userId = GetCurrentUserId();
-            var result = await _reservationService.SearchAsync(query, currentUserId: userId, isAdmin: false);
+            var result = await _reservationService.SearchAsync(query, currentUserId: userId, canViewAll: false);
             return Ok(ToResponse(result));
         }
 
         [HttpGet("room/{roomId:int}")]
-        [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
+        [Authorize(Policy = AuthorizationConstants.Policies.Approver)]
         public async Task<ActionResult<CursorPageResponse<ReservationResponseDto>>> GetByRoom(
             int roomId,
             [FromQuery] int pageSize = 10,
             [FromQuery] string? cursor = null)
         {
-            var isAdmin = IsCurrentUserAdmin();
             var query = new ReservationQueryParameters
             {
                 RoomId = roomId,
@@ -66,7 +65,7 @@ namespace eduHub.api.Controllers
                 Cursor = cursor
             };
 
-            var result = await _reservationService.SearchAsync(query, currentUserId: null, isAdmin: isAdmin);
+            var result = await _reservationService.SearchAsync(query, currentUserId: null, canViewAll: true);
             return Ok(ToResponse(result));
         }
 
@@ -84,9 +83,9 @@ namespace eduHub.api.Controllers
             [FromBody] ReservationUpdateDto dto)
         {
             var userId = GetCurrentUserId();
-            var isAdmin = IsCurrentUserAdmin();
+            var canManage = HasOrgRole(OrganizationMemberRole.OrgAdmin, OrganizationMemberRole.Approver);
 
-            var reservation = await _reservationService.UpdateAsync(id, dto, userId, isAdmin);
+            var reservation = await _reservationService.UpdateAsync(id, dto, userId, canManage);
             return Ok(reservation);
         }
 
@@ -94,9 +93,9 @@ namespace eduHub.api.Controllers
         public async Task<IActionResult> Delete(int id)
         {
             var userId = GetCurrentUserId();
-            var isAdmin = IsCurrentUserAdmin();
+            var canManage = HasOrgRole(OrganizationMemberRole.OrgAdmin, OrganizationMemberRole.Approver);
 
-            var deleted = await _reservationService.DeleteAsync(id, userId, isAdmin);
+            var deleted = await _reservationService.DeleteAsync(id, userId, canManage);
             if (!deleted)
                 return NotFoundProblem();
 
@@ -104,20 +103,18 @@ namespace eduHub.api.Controllers
         }
 
         [HttpPost("{id:int}/approve")]
-        [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
+        [Authorize(Policy = AuthorizationConstants.Policies.Approver)]
         public async Task<ActionResult<ReservationResponseDto>> Approve(int id)
         {
-            var isAdmin = IsCurrentUserAdmin();
-            var reservation = await _reservationService.ApproveAsync(id, isAdmin: isAdmin);
+            var reservation = await _reservationService.ApproveAsync(id, GetCurrentUserId());
             return Ok(reservation);
         }
 
         [HttpPost("{id:int}/reject")]
-        [Authorize(Policy = AuthorizationConstants.Policies.AdminOnly)]
+        [Authorize(Policy = AuthorizationConstants.Policies.Approver)]
         public async Task<ActionResult<ReservationResponseDto>> Reject(int id)
         {
-            var isAdmin = IsCurrentUserAdmin();
-            var reservation = await _reservationService.RejectAsync(id, isAdmin: isAdmin);
+            var reservation = await _reservationService.RejectAsync(id, GetCurrentUserId());
             return Ok(reservation);
         }
 
@@ -133,9 +130,14 @@ namespace eduHub.api.Controllers
             return userId;
         }
 
-        private bool IsCurrentUserAdmin()
+        private bool HasOrgRole(params OrganizationMemberRole[] roles)
         {
-            return User.IsInRole(AuthorizationConstants.Roles.Admin);
+            var roleClaim = User.FindFirst(TenantClaimTypes.OrganizationRole)?.Value;
+            if (string.IsNullOrWhiteSpace(roleClaim))
+                return false;
+
+            return roles.Any(role =>
+                string.Equals(roleClaim, role.ToString(), StringComparison.OrdinalIgnoreCase));
         }
 
         private static CursorPageResponse<ReservationResponseDto> ToResponse(CursorPageResult<ReservationResponseDto> result)

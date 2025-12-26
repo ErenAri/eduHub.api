@@ -1,5 +1,8 @@
+using eduHub.Application.DTOs.Organizations;
 using eduHub.Application.DTOs.Users;
+using eduHub.Application.Interfaces.Tenants;
 using eduHub.Application.Interfaces.Users;
+using eduHub.Application.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -9,40 +12,18 @@ using System.Security.Claims;
 namespace eduHub.api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
-public class AuthController : ApiControllerBase
+[Route("api/org/auth")]
+public class OrgAuthController : ApiControllerBase
 {
     private readonly IUserService _userService;
+    private readonly ICurrentTenant _tenant;
 
-    public AuthController(IUserService userService)
+    public OrgAuthController(IUserService userService, ICurrentTenant tenant)
     {
         _userService = userService;
+        _tenant = tenant;
     }
 
-    /// <summary>
-    /// Registers a new user.
-    /// </summary>
-    [HttpPost("register")]
-    [AllowAnonymous]
-    [EnableRateLimiting("auth")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<UserResponseDto>> Register([FromBody] UserRegisterDto dto)
-    {
-        try
-        {
-            var user = await _userService.RegisterAsync(dto);
-            return Ok(user);
-        }
-        catch (InvalidOperationException)
-        {
-            return BadRequestProblem("Unable to register.", "RegistrationFailed");
-        }
-    }
-
-    /// <summary>
-    /// Logs in and returns JWT + refresh token.
-    /// </summary>
     [HttpPost("login")]
     [AllowAnonymous]
     [EnableRateLimiting("auth")]
@@ -50,18 +31,32 @@ public class AuthController : ApiControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<AuthResponseDto>> Login([FromBody] UserLoginDto dto)
     {
-        var auth = await _userService.LoginAsync(dto);
+        if (!_tenant.OrganizationId.HasValue)
+            return NotFoundProblem("Tenant not found.");
+
+        var auth = await _userService.LoginAsync(dto, _tenant.OrganizationId.Value);
         if (auth == null)
             return BadRequestProblem("Invalid credentials.", "InvalidCredentials");
 
         return Ok(auth);
     }
 
-    /// <summary>
-    /// Returns the authenticated user profile.
-    /// </summary>
+    [HttpPost("redeem-invite")]
+    [AllowAnonymous]
+    [EnableRateLimiting("auth")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<AuthResponseDto>> RedeemInvite([FromBody] OrganizationInviteRedeemDto dto)
+    {
+        if (!_tenant.OrganizationId.HasValue)
+            return NotFoundProblem("Tenant not found.");
+
+        var auth = await _userService.RedeemInviteAsync(dto, _tenant.OrganizationId.Value);
+        return Ok(auth);
+    }
+
     [HttpGet("me")]
-    [Authorize]
+    [Authorize(Policy = AuthorizationConstants.Policies.OrgUser)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
@@ -71,16 +66,16 @@ public class AuthController : ApiControllerBase
         if (string.IsNullOrWhiteSpace(userIdValue) || !int.TryParse(userIdValue, out var userId))
             return UnauthorizedProblem("Invalid token.");
 
-        var user = await _userService.GetByIdAsync(userId);
+        if (!_tenant.OrganizationId.HasValue)
+            return NotFoundProblem("Tenant not found.");
+
+        var user = await _userService.GetByIdInOrgAsync(userId, _tenant.OrganizationId.Value);
         if (user == null)
             return NotFoundProblem("User not found.");
 
         return Ok(user);
     }
 
-    /// <summary>
-    /// Exchanges a refresh token for a new access token.
-    /// </summary>
     [HttpPost("refresh")]
     [AllowAnonymous]
     [EnableRateLimiting("auth")]
@@ -92,18 +87,18 @@ public class AuthController : ApiControllerBase
         if (string.IsNullOrWhiteSpace(dto.RefreshToken))
             return BadRequestProblem("Refresh token is required.", "RefreshTokenRequired");
 
-        var auth = await _userService.RefreshAsync(dto);
+        if (!_tenant.OrganizationId.HasValue)
+            return NotFoundProblem("Tenant not found.");
+
+        var auth = await _userService.RefreshAsync(dto, _tenant.OrganizationId.Value);
         if (auth == null)
             return UnauthorizedProblem("Invalid refresh token.");
 
         return Ok(auth);
     }
 
-    /// <summary>
-    /// Revokes the current access token immediately.
-    /// </summary>
     [HttpPost("logout")]
-    [Authorize]
+    [Authorize(Policy = AuthorizationConstants.Policies.OrgUser)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Logout()
