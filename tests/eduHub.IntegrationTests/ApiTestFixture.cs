@@ -38,11 +38,15 @@ public sealed class ApiTestFixture : IAsyncLifetime
         await _postgres.DisposeAsync();
     }
 
-    public HttpClient CreateClient(string? forwardedFor = null)
+    public HttpClient CreateClient(string? tenantSlug = null, string? forwardedFor = null)
     {
+        var host = string.IsNullOrWhiteSpace(tenantSlug)
+            ? "localhost"
+            : $"{tenantSlug}.localhost";
+
         var client = Factory.CreateClient(new WebApplicationFactoryClientOptions
         {
-            BaseAddress = new Uri("https://localhost"),
+            BaseAddress = new Uri($"https://{host}"),
             AllowAutoRedirect = false
         });
 
@@ -55,9 +59,9 @@ public sealed class ApiTestFixture : IAsyncLifetime
     public async Task ResetDatabaseAsync()
     {
         using var scope = Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();      
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE TABLE buildings, rooms, reservations, users, refresh_tokens, revoked_tokens RESTART IDENTITY CASCADE;");
+            "TRUNCATE TABLE audit_logs, organization_invites, organization_members, organizations, buildings, rooms, reservations, users, refresh_tokens, revoked_tokens RESTART IDENTITY CASCADE;");
     }
 
     private WebApplicationFactory<Program> BuildFactory()
@@ -91,10 +95,10 @@ public sealed class ApiTestFixture : IAsyncLifetime
     private async Task EnsureDatabaseAsync()
     {
         using var scope = Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();      
         await db.Database.MigrateAsync();
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE TABLE buildings, rooms, reservations, users, refresh_tokens, revoked_tokens RESTART IDENTITY CASCADE;");
+            "TRUNCATE TABLE audit_logs, organization_invites, organization_members, organizations, buildings, rooms, reservations, users, refresh_tokens, revoked_tokens RESTART IDENTITY CASCADE;");
     }
 
     private static string NewJwtKey()

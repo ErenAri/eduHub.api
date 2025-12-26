@@ -1,6 +1,7 @@
 using eduHub.Domain.Entities;
 using eduHub.Domain.Enums;
 using eduHub.Infrastructure.Persistence;
+using eduHub.Infrastructure.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Testcontainers.PostgreSql;
 
@@ -25,51 +26,87 @@ public class ReservationConstraintTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task OverlappingReservations_AreBlockedByDatabaseConstraint()
+    public async Task OverlappingReservations_AreBlockedByDatabaseConstraint()  
     {
-        await using var context = CreateDbContext();
-        await context.Database.MigrateAsync();
-
-        var building = new Building { Name = "Test Building" };
-        context.Buildings.Add(building);
-        await context.SaveChangesAsync();
-
-        var room = new Room { Name = "Room 101", Code = "R101", Capacity = 10, BuildingId = building.Id };
-        context.Rooms.Add(room);
-        await context.SaveChangesAsync();
-
-        var start = DateTimeOffset.UtcNow.AddHours(1);
-        var end = start.AddHours(2);
-        context.Reservations.Add(new Reservation
+        var (context, tenant) = CreateDbContext();
+        await using (context)
         {
-            RoomId = room.Id,
-            StartTimeUtc = start,
-            EndTimeUtc = end,
-            Purpose = "First",
-            Status = ReservationStatus.Approved,
-            CreatedAtUtc = DateTimeOffset.UtcNow
-        });
-        await context.SaveChangesAsync();
+            await context.Database.MigrateAsync();
+            await ResetDatabaseAsync(context);
 
-        context.Reservations.Add(new Reservation
-        {
-            RoomId = room.Id,
-            StartTimeUtc = start.AddMinutes(30),
-            EndTimeUtc = end.AddMinutes(30),
-            Purpose = "Overlap",
-            Status = ReservationStatus.Approved,
-            CreatedAtUtc = DateTimeOffset.UtcNow
-        });
+            var org = await EnsureOrganizationAsync(context);
+            tenant.SetTenant(org.Id);
 
-        await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync());
+            var building = new Building { Name = "Test Building" };
+            context.Buildings.Add(building);
+            await context.SaveChangesAsync();
+
+            var room = new Room
+            {
+                Name = "Room 101",
+                Code = "R101",
+                Capacity = 10,
+                BuildingId = building.Id
+            };
+            context.Rooms.Add(room);
+            await context.SaveChangesAsync();
+
+            var start = DateTimeOffset.UtcNow.AddHours(1);
+            var end = start.AddHours(2);
+            context.Reservations.Add(new Reservation
+            {
+                RoomId = room.Id,
+                StartTimeUtc = start,
+                EndTimeUtc = end,
+                Purpose = "First",
+                Status = ReservationStatus.Approved,
+                CreatedAtUtc = DateTimeOffset.UtcNow
+            });
+            await context.SaveChangesAsync();
+
+            context.Reservations.Add(new Reservation
+            {
+                RoomId = room.Id,
+                StartTimeUtc = start.AddMinutes(30),
+                EndTimeUtc = end.AddMinutes(30),
+                Purpose = "Overlap",
+                Status = ReservationStatus.Approved,
+                CreatedAtUtc = DateTimeOffset.UtcNow
+            });
+
+            await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync());
+        }
     }
 
-    private AppDbContext CreateDbContext()
+    private (AppDbContext Context, CurrentTenant Tenant) CreateDbContext()
     {
+        var tenant = new CurrentTenant();
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseNpgsql(_postgres.GetConnectionString())
             .Options;
 
-        return new AppDbContext(options);
+        return (new AppDbContext(options, tenant), tenant);
+    }
+
+    private static async Task ResetDatabaseAsync(AppDbContext context)
+    {
+        await context.Database.ExecuteSqlRawAsync(
+            "TRUNCATE TABLE audit_logs, organization_invites, organization_members, organizations, buildings, rooms, reservations, users, refresh_tokens, revoked_tokens RESTART IDENTITY CASCADE;");
+    }
+
+    private static async Task<Organization> EnsureOrganizationAsync(AppDbContext context)
+    {
+        var org = new Organization
+        {
+            Id = Guid.NewGuid(),
+            Name = "Test Org",
+            Slug = $"org-{Guid.NewGuid():N}",
+            IsActive = true,
+            CreatedAtUtc = DateTimeOffset.UtcNow
+        };
+
+        context.Organizations.Add(org);
+        await context.SaveChangesAsync();
+        return org;
     }
 }
