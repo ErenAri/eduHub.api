@@ -13,6 +13,7 @@ public sealed class TenantResolutionMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ProblemDetailsFactory _problemDetailsFactory;
+    private static readonly string[] ReservedSubdomains = { "www" };
 
     public TenantResolutionMiddleware(
         RequestDelegate next,
@@ -38,8 +39,7 @@ public sealed class TenantResolutionMiddleware
 
         if (path.StartsWithSegments("/api/org", StringComparison.OrdinalIgnoreCase))
         {
-            var host = context.Request.Host.Host;
-            var slug = ExtractSubdomain(host);
+            var slug = ResolveTenantSlug(context);
             if (string.IsNullOrWhiteSpace(slug))
             {
                 await WriteTenantNotFoundAsync(context);
@@ -64,16 +64,57 @@ public sealed class TenantResolutionMiddleware
         await _next(context);
     }
 
-    private static string? ExtractSubdomain(string host)
+    private static string? ResolveTenantSlug(HttpContext context)
+    {
+        var headerSlug = context.Request.Headers["x-tenant-slug"].FirstOrDefault();
+        var normalizedHeader = NormalizeSlug(headerSlug);
+        if (!string.IsNullOrWhiteSpace(normalizedHeader))
+            return normalizedHeader;
+
+        var forwardedHost = context.Request.Headers["x-forwarded-host"].FirstOrDefault();
+        var forwardedSlug = ExtractSubdomain(forwardedHost);
+        if (!string.IsNullOrWhiteSpace(forwardedSlug))
+            return forwardedSlug;
+
+        return ExtractSubdomain(context.Request.Host.Host);
+    }
+
+    private static string? ExtractSubdomain(string? host)
     {
         if (string.IsNullOrWhiteSpace(host))
             return null;
 
-        var parts = host.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (parts.Length < 2)
+        var hostname = host.Split(':')[0].Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(hostname))
             return null;
 
-        return parts[0];
+        if (hostname is "localhost" or "127.0.0.1" or "::1")
+            return null;
+
+        if (hostname.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            var prefix = hostname[..^".localhost".Length];
+            var subdomain = prefix.Split('.', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+            return NormalizeSlug(subdomain);
+        }
+
+        var parts = hostname.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length <= 2)
+            return null;
+
+        return NormalizeSlug(parts[0]);
+    }
+
+    private static string? NormalizeSlug(string? slug)
+    {
+        if (string.IsNullOrWhiteSpace(slug))
+            return null;
+
+        var trimmed = slug.Trim().ToLowerInvariant();
+        if (ReservedSubdomains.Contains(trimmed))
+            return null;
+
+        return trimmed;
     }
 
     private async Task WriteTenantNotFoundAsync(HttpContext context)

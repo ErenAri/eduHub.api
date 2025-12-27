@@ -1,4 +1,5 @@
 using eduHub.Application.DTOs.Users;
+using eduHub.Application.Interfaces.Tenants;
 using eduHub.Application.Interfaces.Users;
 using eduHub.Application.Security;
 using Microsoft.AspNetCore.Authorization;
@@ -25,13 +26,16 @@ public class UsersController : ApiControllerBase
     private readonly IUserService _userService;
     private readonly IWebHostEnvironment _environment;
     private readonly IConfiguration _configuration;
+    private readonly ICurrentTenant _tenant;
 
     public UsersController(
         IUserService userService,
+        ICurrentTenant tenant,
         IWebHostEnvironment environment,
         IConfiguration configuration)
     {
         _userService = userService;
+        _tenant = tenant;
         _environment = environment;
         _configuration = configuration;
     }
@@ -53,6 +57,73 @@ public class UsersController : ApiControllerBase
             return NotFoundProblem("User not found.");
 
         return Ok(user);
+    }
+
+    [HttpGet]
+    [Authorize(Policy = AuthorizationConstants.Policies.OrgAdmin)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<IEnumerable<OrganizationUserResponseDto>>> GetAll()
+    {
+        if (!TryGetOrganizationId(out var organizationId))
+            return UnauthorizedProblem("Invalid tenant context.");
+
+        var users = await _userService.GetOrganizationUsersAsync(organizationId);
+        return Ok(users);
+    }
+
+    [HttpPost]
+    [Authorize(Policy = AuthorizationConstants.Policies.OrgAdmin)]
+    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<OrganizationUserResponseDto>> Create([FromBody] OrganizationUserCreateDto dto)
+    {
+        if (!TryGetOrganizationId(out var organizationId))
+            return UnauthorizedProblem("Invalid tenant context.");
+
+        var created = await _userService.CreateOrganizationUserAsync(organizationId, dto);
+        return CreatedAtAction(nameof(GetAll), new { }, created);
+    }
+
+    [HttpPatch("{userId:int}")]
+    [Authorize(Policy = AuthorizationConstants.Policies.OrgAdmin)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<OrganizationUserResponseDto>> Update(
+        int userId,
+        [FromBody] OrganizationUserUpdateDto dto)
+    {
+        if (!TryGetOrganizationId(out var organizationId))
+            return UnauthorizedProblem("Invalid tenant context.");
+
+        if (TryGetUserId(out var currentUserId) &&
+            currentUserId == userId &&
+            (dto.Role.HasValue || dto.Status.HasValue))
+        {
+            return BadRequestProblem("Use profile settings to update your own account.");
+        }
+
+        var updated = await _userService.UpdateOrganizationUserAsync(organizationId, userId, dto);
+        return Ok(updated);
+    }
+
+    [HttpDelete("{userId:int}")]
+    [Authorize(Policy = AuthorizationConstants.Policies.OrgAdmin)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> Delete(int userId)
+    {
+        if (!TryGetOrganizationId(out var organizationId))
+            return UnauthorizedProblem("Invalid tenant context.");
+
+        if (TryGetUserId(out var currentUserId) && currentUserId == userId)
+            return BadRequestProblem("You cannot remove yourself.");
+
+        var removed = await _userService.RemoveOrganizationUserAsync(organizationId, userId);
+        if (!removed)
+            return NotFoundProblem("User not found.");
+
+        return NoContent();
     }
 
     [HttpPatch("me")]
@@ -149,6 +220,12 @@ public class UsersController : ApiControllerBase
     private bool TryGetOrganizationId(out Guid organizationId)
     {
         organizationId = Guid.Empty;
+        if (_tenant.OrganizationId.HasValue)
+        {
+            organizationId = _tenant.OrganizationId.Value;
+            return true;
+        }
+
         var orgIdValue = User.FindFirstValue(TenantClaimTypes.OrganizationId);
         return !string.IsNullOrWhiteSpace(orgIdValue) && Guid.TryParse(orgIdValue, out organizationId);
     }

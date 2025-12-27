@@ -246,7 +246,7 @@ public class ServiceIntegrationTests : IAsyncLifetime
         {
             var org = await EnsureOrganizationAsync(context);
             tenant.SetTenant(org.Id);
-            var service = new BuildingService(context);
+            var service = new BuildingService(context, tenant);
 
             var prefix = $"cursor-{Guid.NewGuid():N}";
             var first = new Building { Name = $"{prefix}-a" };

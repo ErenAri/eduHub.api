@@ -10,7 +10,7 @@
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Memory" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.0" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="3.9.0" />
@@ -23,6 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\eduHub.api\eduHub.api.csproj" />
     <ProjectReference Include="..\..\src\eduHub.Application\eduHub.Application.csproj" />
     <ProjectReference Include="..\..\src\eduHub.Domain\eduHub.Domain.csproj" />
     <ProjectReference Include="..\..\src\eduHub.Infrastructure\eduHub.Infrastructure.csproj" />

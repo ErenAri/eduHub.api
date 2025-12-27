@@ -79,40 +79,42 @@ public static class DbInitializer
         IConfiguration configuration,
         string? adminPassword)
     {
-        if (await context.Users.AnyAsync(u => u.Role == UserRole.Admin))
-            return;
+        var admin = await context.Users.FirstOrDefaultAsync(u => u.Role == UserRole.Admin);
 
-        if (string.IsNullOrWhiteSpace(adminPassword))
-            throw new InvalidOperationException("Seed:Admin:Password must be set when seeding the admin user.");
-
-        if (adminPassword.Length < 12 ||
-            string.Equals(adminPassword, "Admin123!", StringComparison.Ordinal) ||
-            string.Equals(adminPassword, "admin", StringComparison.Ordinal))
+        if (admin == null)
         {
-            throw new InvalidOperationException("Seed:Admin:Password does not meet security requirements.");
+            if (string.IsNullOrWhiteSpace(adminPassword))
+                throw new InvalidOperationException("Seed:Admin:Password must be set when seeding the admin user.");
+
+            if (adminPassword.Length < 12 ||
+                string.Equals(adminPassword, "Admin123!", StringComparison.Ordinal) ||
+                string.Equals(adminPassword, "admin", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Seed:Admin:Password does not meet security requirements.");
+            }
+
+            var userName = configuration["Seed:Admin:UserName"];
+            if (string.IsNullOrWhiteSpace(userName))
+                throw new InvalidOperationException("Seed:Admin:UserName must be set when seeding the admin user.");
+
+            var email = configuration["Seed:Admin:Email"];
+            if (string.IsNullOrWhiteSpace(email))
+                throw new InvalidOperationException("Seed:Admin:Email must be set when seeding the admin user.");
+
+            var passwordHash = BCrypt.Net.BCrypt.HashPassword(adminPassword);
+
+            admin = new User
+            {
+                UserName = userName,
+                Email = email,
+                PasswordHash = passwordHash,
+                Role = UserRole.Admin,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+
+            context.Users.Add(admin);
+            await context.SaveChangesAsync();
         }
-
-        var userName = configuration["Seed:Admin:UserName"];
-        if (string.IsNullOrWhiteSpace(userName))
-            throw new InvalidOperationException("Seed:Admin:UserName must be set when seeding the admin user.");
-
-        var email = configuration["Seed:Admin:Email"];
-        if (string.IsNullOrWhiteSpace(email))
-            throw new InvalidOperationException("Seed:Admin:Email must be set when seeding the admin user.");
-
-        var passwordHash = BCrypt.Net.BCrypt.HashPassword(adminPassword);
-
-        var admin = new User
-        {
-            UserName = userName,
-            Email = email,
-            PasswordHash = passwordHash,
-            Role = UserRole.Admin,
-            CreatedAtUtc = DateTime.UtcNow
-        };
-
-        context.Users.Add(admin);
-        await context.SaveChangesAsync();
 
         tenantSetter.SetTenant(organizationId);
         try

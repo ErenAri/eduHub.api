@@ -132,6 +132,10 @@ namespace eduHub.api.Controllers
 
         private bool HasOrgRole(params OrganizationMemberRole[] roles)
         {
+            var platformClaim = User.FindFirst(TenantClaimTypes.IsPlatformAdmin)?.Value;
+            if (string.Equals(platformClaim, "true", StringComparison.OrdinalIgnoreCase))
+                return true;
+
             var roleClaim = User.FindFirst(TenantClaimTypes.OrganizationRole)?.Value;
             if (string.IsNullOrWhiteSpace(roleClaim))
                 return false;

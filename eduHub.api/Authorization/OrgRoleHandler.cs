@@ -25,6 +25,13 @@ public sealed class OrgRoleHandler : AuthorizationHandler<OrgRoleRequirement>
         if (context.User?.Identity?.IsAuthenticated != true)
             return Task.CompletedTask;
 
+        var platformClaim = context.User.FindFirst(TenantClaimTypes.IsPlatformAdmin)?.Value;
+        if (string.Equals(platformClaim, "true", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Succeed(requirement);
+            return Task.CompletedTask;
+        }
+
         if (_tenant.IsPlatformScope || !_tenant.OrganizationId.HasValue)
             return Task.CompletedTask;
 

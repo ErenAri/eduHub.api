@@ -41,6 +41,20 @@ public class OrgAuthController : ApiControllerBase
         return Ok(auth);
     }
 
+    [HttpPost("register")]
+    [AllowAnonymous]
+    [EnableRateLimiting("auth")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<AuthResponseDto>> Register([FromBody] UserRegisterDto dto)
+    {
+        if (!_tenant.OrganizationId.HasValue)
+            return NotFoundProblem("Tenant not found.");
+
+        var auth = await _userService.RegisterInOrganizationAsync(dto, _tenant.OrganizationId.Value);
+        return Ok(auth);
+    }
+
     [HttpPost("redeem-invite")]
     [AllowAnonymous]
     [EnableRateLimiting("auth")]

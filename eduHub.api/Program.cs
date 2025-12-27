@@ -192,12 +192,36 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
                 var jti = context.Principal?.FindFirstValue(JwtRegisteredClaimNames.Jti);
                 var orgIdValue = context.Principal?.FindFirstValue(TenantClaimTypes.OrganizationId);
                 var orgRoleValue = context.Principal?.FindFirstValue(TenantClaimTypes.OrganizationRole);
+                var platformClaim = context.Principal?.FindFirstValue(TenantClaimTypes.IsPlatformAdmin);
 
                 if (string.IsNullOrWhiteSpace(userIdValue) ||
                     string.IsNullOrWhiteSpace(jti) ||
-                    string.IsNullOrWhiteSpace(orgIdValue) ||
+                    !int.TryParse(userIdValue, out var userId))
+                {
+                    context.Fail("Invalid token claims.");
+                    return;
+                }
+
+                var db = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
+                var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId);
+                var isRevoked = await db.RevokedTokens.AnyAsync(t => t.Jti == jti);
+                if (user == null || isRevoked)
+                {
+                    context.Fail("Token is no longer valid.");
+                    return;
+                }
+
+                if (string.Equals(platformClaim, "true", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (user.Role != UserRole.Admin)
+                    {
+                        context.Fail("Invalid token claims.");
+                    }
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(orgIdValue) ||
                     string.IsNullOrWhiteSpace(orgRoleValue) ||
-                    !int.TryParse(userIdValue, out var userId) ||
                     !Guid.TryParse(orgIdValue, out var organizationId) ||
                     !Enum.TryParse<OrganizationMemberRole>(orgRoleValue, true, out _))
                 {
@@ -205,9 +229,6 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
                     return;
                 }
 
-                var db = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
-                var userExists = await db.Users.AnyAsync(u => u.Id == userId);
-                var isRevoked = await db.RevokedTokens.AnyAsync(t => t.Jti == jti);
                 var membershipValid = await db.OrganizationMembers.AnyAsync(m =>
                     m.OrganizationId == organizationId &&
                     m.UserId == userId &&
@@ -216,7 +237,7 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
                     o.Id == organizationId &&
                     o.IsActive);
 
-                if (!userExists || isRevoked || !membershipValid || !orgActive)
+                if (!membershipValid || !orgActive)
                     context.Fail("Token is no longer valid.");
             }
         };
@@ -517,3 +538,5 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 }).RequireAuthorization();
 
 app.Run();
+
+public partial class Program { }
