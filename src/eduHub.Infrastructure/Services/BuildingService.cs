@@ -67,8 +67,10 @@ public class BuildingService : IBuildingService
             throw new InvalidOperationException("Tenant context is missing.");
 
         var hasRooms = await _context.Rooms
-            .IgnoreQueryFilters()
-            .AnyAsync(r => r.BuildingId == id && r.OrganizationId == organizationId.Value);
+            .AnyAsync(r =>
+                r.BuildingId == id &&
+                r.OrganizationId == organizationId.Value &&
+                !r.IsDeleted);
 
         if (hasRooms)
             throw new ConflictException(

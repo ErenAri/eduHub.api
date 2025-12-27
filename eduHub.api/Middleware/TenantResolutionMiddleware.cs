@@ -6,6 +6,7 @@ using eduHub.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace eduHub.api.Middleware;
 
@@ -13,14 +14,17 @@ public sealed class TenantResolutionMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ProblemDetailsFactory _problemDetailsFactory;
+    private readonly ILogger<TenantResolutionMiddleware> _logger;
     private static readonly string[] ReservedSubdomains = { "www" };
 
     public TenantResolutionMiddleware(
         RequestDelegate next,
-        ProblemDetailsFactory problemDetailsFactory)
+        ProblemDetailsFactory problemDetailsFactory,
+        ILogger<TenantResolutionMiddleware> logger)
     {
         _next = next;
         _problemDetailsFactory = problemDetailsFactory;
+        _logger = logger;
     }
 
     public async Task InvokeAsync(
@@ -119,6 +123,19 @@ public sealed class TenantResolutionMiddleware
 
     private async Task WriteTenantNotFoundAsync(HttpContext context)
     {
+        var headerSlug = context.Request.Headers["x-tenant-slug"].FirstOrDefault();
+        var forwardedHost = context.Request.Headers["x-forwarded-host"].FirstOrDefault();
+        var cookieSlug = context.Request.Cookies["orgSlug"];
+        var host = context.Request.Host.HasValue ? context.Request.Host.Value : null;
+
+        _logger.LogWarning(
+            "Tenant not found. Path: {Path}, Host: {Host}, ForwardedHost: {ForwardedHost}, HeaderSlug: {HeaderSlug}, CookieSlug: {CookieSlug}",
+            context.Request.Path.Value,
+            host,
+            forwardedHost,
+            headerSlug,
+            cookieSlug);
+
         var problem = _problemDetailsFactory.CreateProblemDetails(
             context,
             statusCode: StatusCodes.Status404NotFound,

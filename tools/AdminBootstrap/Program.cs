@@ -1,12 +1,16 @@
 using Npgsql;
 
 const string DefaultOrgName = "Default Organization";
-const string DefaultOrgSlug = "default";
+const string DefaultOrgSlugFallback = "k0n1w3hw";
 
 var connectionString = Environment.GetEnvironmentVariable("EDUHUB_CONN");
 var adminUserName = Environment.GetEnvironmentVariable("EDUHUB_ADMIN_USERNAME") ?? "admin1";
 var adminPassword = Environment.GetEnvironmentVariable("EDUHUB_ADMIN_PASSWORD");
 var adminEmail = Environment.GetEnvironmentVariable("EDUHUB_ADMIN_EMAIL") ?? $"{adminUserName}@eduhub.local";
+var defaultOrgSlug = Environment.GetEnvironmentVariable("EDUHUB_DEFAULT_ORG_SLUG");
+if (string.IsNullOrWhiteSpace(defaultOrgSlug))
+    defaultOrgSlug = DefaultOrgSlugFallback;
+defaultOrgSlug = defaultOrgSlug.Trim().ToLowerInvariant();
 
 if (string.IsNullOrWhiteSpace(connectionString))
 {
@@ -97,7 +101,7 @@ var membersTableExists = await TableExistsAsync(conn, "organization_members");
 
 if (adminId.HasValue && orgsTableExists && membersTableExists)
 {
-    var orgId = await EnsureDefaultOrganizationAsync(conn);
+    var orgId = await EnsureDefaultOrganizationAsync(conn, defaultOrgSlug);
     await EnsureOrgAdminMembershipAsync(conn, orgId, adminId.Value);
 }
 else if (!orgsTableExists || !membersTableExists)
@@ -119,7 +123,7 @@ static async Task<bool> TableExistsAsync(NpgsqlConnection conn, string tableName
     return await cmd.ExecuteScalarAsync() != null;
 }
 
-static async Task<Guid> EnsureDefaultOrganizationAsync(NpgsqlConnection conn)
+static async Task<Guid> EnsureDefaultOrganizationAsync(NpgsqlConnection conn, string slug)
 {
     await using (var select = conn.CreateCommand())
     {
@@ -128,7 +132,7 @@ static async Task<Guid> EnsureDefaultOrganizationAsync(NpgsqlConnection conn)
             FROM organizations
             WHERE ""Slug"" = @slug
             LIMIT 1;";
-        select.Parameters.AddWithValue("slug", DefaultOrgSlug);
+        select.Parameters.AddWithValue("slug", slug);
         var existing = await select.ExecuteScalarAsync();
         if (existing is Guid id)
             return id;
@@ -142,7 +146,7 @@ static async Task<Guid> EnsureDefaultOrganizationAsync(NpgsqlConnection conn)
             VALUES (@id, @name, @slug, TRUE, @created);";
         insert.Parameters.AddWithValue("id", newId);
         insert.Parameters.AddWithValue("name", DefaultOrgName);
-        insert.Parameters.AddWithValue("slug", DefaultOrgSlug);
+        insert.Parameters.AddWithValue("slug", slug);
         insert.Parameters.AddWithValue("created", DateTimeOffset.UtcNow);
         await insert.ExecuteNonQueryAsync();
     }

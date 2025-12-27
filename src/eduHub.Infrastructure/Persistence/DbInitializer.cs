@@ -13,7 +13,8 @@ namespace eduHub.Infrastructure.Persistence;
 public static class DbInitializer
 {
     private const string DefaultOrgName = "Default Organization";
-    private const string DefaultOrgSlug = "default";
+    private const string DefaultOrgSlugFallback = "k0n1w3hw";
+    private const string LegacyDefaultOrgSlug = "default";
 
     public static async Task SeedAsync(
         AppDbContext context,
@@ -29,7 +30,8 @@ public static class DbInitializer
         if (!seedEnabled)
             return;
 
-        var defaultOrg = await EnsureDefaultOrganizationAsync(context);
+        var defaultOrgSlug = GetDefaultOrgSlug(configuration);
+        var defaultOrg = await EnsureDefaultOrganizationAsync(context, defaultOrgSlug);
 
         if (seedAdmin)
         {
@@ -52,9 +54,34 @@ public static class DbInitializer
         }
     }
 
-    private static async Task<Organization> EnsureDefaultOrganizationAsync(AppDbContext context)
+    private static string GetDefaultOrgSlug(IConfiguration configuration)
     {
-        var org = await context.Organizations.FirstOrDefaultAsync(o => o.Slug == DefaultOrgSlug);
+        var slug = configuration["Seed:DefaultOrg:Slug"];
+        if (string.IsNullOrWhiteSpace(slug))
+            slug = DefaultOrgSlugFallback;
+
+        return slug.Trim().ToLowerInvariant();
+    }
+
+    private static async Task<Organization> EnsureDefaultOrganizationAsync(AppDbContext context, string slug)
+    {
+        var org = await context.Organizations.FirstOrDefaultAsync(o => o.Slug == slug);
+        if (org != null)
+            return org;
+
+        org = await context.Organizations.FirstOrDefaultAsync(o => o.Slug == LegacyDefaultOrgSlug);
+        if (org != null)
+        {
+            if (!string.Equals(org.Slug, slug, StringComparison.OrdinalIgnoreCase))
+            {
+                org.Slug = slug;
+                await context.SaveChangesAsync();
+            }
+
+            return org;
+        }
+
+        org = await context.Organizations.FirstOrDefaultAsync(o => o.Name == DefaultOrgName);
         if (org != null)
             return org;
 
@@ -62,7 +89,7 @@ public static class DbInitializer
         {
             Id = Guid.NewGuid(),
             Name = DefaultOrgName,
-            Slug = DefaultOrgSlug,
+            Slug = slug,
             IsActive = true,
             CreatedAtUtc = DateTimeOffset.UtcNow
         };

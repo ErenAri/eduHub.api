@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
 using eduHub.Application.DTOs.Organizations;
 using eduHub.Application.Interfaces.Organizations;
 using eduHub.Application.Security;
@@ -13,6 +14,9 @@ namespace eduHub.api.Controllers;
 [Authorize(Policy = AuthorizationConstants.Policies.PlatformAdmin)]
 public class PlatformOrganizationsController : ApiControllerBase
 {
+    private const int OrgSlugLength = 8;
+    private const int MaxSlugAttempts = 10;
+    private static readonly char[] OrgSlugAlphabet = "abcdefghijklmnopqrstuvwxyz0123456789".ToCharArray();
     private readonly IOrganizationService _organizationService;
 
     public PlatformOrganizationsController(IOrganizationService organizationService)
@@ -49,13 +53,20 @@ public class PlatformOrganizationsController : ApiControllerBase
         if (string.IsNullOrWhiteSpace(name))
             return BadRequestProblem("Name is required.");
 
-        var slug = dto.Slug.Trim().ToLowerInvariant();
+        var slug = dto.Slug?.Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(slug))
-            return BadRequestProblem("Slug is required.");
+        {
+            slug = await GenerateUniqueSlugAsync();
+        }
+        else
+        {
+            if (!IsValidSlug(slug))
+                return BadRequestProblem("Organization ID must be 8 characters of lowercase letters and numbers.");
 
-        var existing = await _organizationService.GetBySlugAsync(slug);
-        if (existing != null)
-            return ConflictProblem("Organization slug already exists.");
+            var existing = await _organizationService.GetBySlugAsync(slug);
+            if (existing != null)
+                return ConflictProblem("Organization ID already exists.");
+        }
 
         var org = new Organization
         {
@@ -112,6 +123,46 @@ public class PlatformOrganizationsController : ApiControllerBase
             IsActive = org.IsActive,
             CreatedAtUtc = org.CreatedAtUtc
         };
+    }
+
+    private async Task<string> GenerateUniqueSlugAsync()
+    {
+        for (var attempt = 0; attempt < MaxSlugAttempts; attempt++)
+        {
+            var slug = GenerateSlug();
+            if (await _organizationService.GetBySlugAsync(slug) == null)
+                return slug;
+        }
+
+        throw new InvalidOperationException("Failed to generate a unique organization ID.");
+    }
+
+    private static string GenerateSlug()
+    {
+        Span<char> buffer = stackalloc char[OrgSlugLength];
+        for (var i = 0; i < buffer.Length; i++)
+        {
+            var index = RandomNumberGenerator.GetInt32(OrgSlugAlphabet.Length);
+            buffer[i] = OrgSlugAlphabet[index];
+        }
+
+        return new string(buffer);
+    }
+
+    private static bool IsValidSlug(string slug)
+    {
+        if (slug.Length != OrgSlugLength)
+            return false;
+
+        foreach (var ch in slug)
+        {
+            var isLowerAlpha = ch is >= 'a' and <= 'z';
+            var isDigit = ch is >= '0' and <= '9';
+            if (!isLowerAlpha && !isDigit)
+                return false;
+        }
+
+        return true;
     }
 
     private int? GetCurrentUserId()
