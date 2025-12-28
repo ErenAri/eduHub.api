@@ -22,6 +22,30 @@ public class OrganizationService : IOrganizationService
             .ToListAsync();
     }
 
+    public async Task<List<Organization>> SearchActiveAsync(string? query, int limit)
+    {
+        var size = limit;
+        if (size < 1) size = 10;
+        if (size > 200) size = 200;
+
+        var orgs = _context.Organizations
+            .AsNoTracking()
+            .Where(o => o.IsActive);
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            var term = query.Trim();
+            orgs = orgs.Where(o =>
+                EF.Functions.ILike(o.Name, $"%{term}%") ||
+                EF.Functions.ILike(o.Slug, $"%{term}%"));
+        }
+
+        return await orgs
+            .OrderBy(o => o.Name)
+            .Take(size)
+            .ToListAsync();
+    }
+
     public async Task<Organization?> GetByIdAsync(Guid id)
     {
         return await _context.Organizations
@@ -34,6 +58,13 @@ public class OrganizationService : IOrganizationService
         return await _context.Organizations
             .AsNoTracking()
             .FirstOrDefaultAsync(o => o.Slug == slug);
+    }
+
+    public async Task<Organization?> GetActiveBySlugAsync(string slug)
+    {
+        return await _context.Organizations
+            .AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Slug == slug && o.IsActive);
     }
 
     public async Task<Organization> CreateAsync(Organization organization)

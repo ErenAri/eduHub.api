@@ -1,10 +1,13 @@
 using eduHub.Application.Common;
 using eduHub.Application.DTOs.Reservations;
+using eduHub.Application.Interfaces.Availability;
 using eduHub.Application.Interfaces.Reservations;
+using eduHub.Application.Options;
 using eduHub.Domain.Entities;
 using eduHub.Domain.Enums;
 using eduHub.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Npgsql;
 
 namespace eduHub.Infrastructure.Services
@@ -12,10 +15,17 @@ namespace eduHub.Infrastructure.Services
     public class ReservationService : IReservationService
     {
         private readonly AppDbContext _context;
+        private readonly IAvailabilityService _availabilityService;
+        private readonly ReservationPolicyOptions _policy;
 
-        public ReservationService(AppDbContext context)
+        public ReservationService(
+            AppDbContext context,
+            IAvailabilityService availabilityService,
+            IOptions<ReservationPolicyOptions> policyOptions)
         {
             _context = context;
+            _availabilityService = availabilityService;
+            _policy = policyOptions.Value;
         }
 
         public async Task<ReservationResponseDto?> GetByIdAsync(int id, int currentUserId, bool canViewAll)
@@ -132,11 +142,7 @@ namespace eduHub.Infrastructure.Services
             var startUtc = dto.StartTimeUtc.ToUniversalTime();
             var endUtc = dto.EndTimeUtc.ToUniversalTime();
 
-            var roomExists = await _context.Rooms.AnyAsync(r => r.Id == dto.RoomId);
-            if (!roomExists)
-                throw new InvalidOperationException("Room does not exist.");
-
-            await EnsureNoConflicts(dto.RoomId, startUtc, endUtc, null);
+            await _availabilityService.ValidateReservationAsync(dto.RoomId, startUtc, endUtc);
 
             var reservation = new Reservation
             {
@@ -146,7 +152,10 @@ namespace eduHub.Infrastructure.Services
                 Purpose = dto.Purpose,
                 Status = ReservationStatus.Pending,
                 CreatedByUserId = createdByUserId,
-                CreatedAtUtc = DateTimeOffset.UtcNow
+                CreatedAtUtc = DateTimeOffset.UtcNow,
+                ExpiresAtUtc = _policy.PendingExpiryHours > 0
+                    ? DateTimeOffset.UtcNow.AddHours(_policy.PendingExpiryHours)
+                    : null
             };
 
             _context.Reservations.Add(reservation);
@@ -183,12 +192,22 @@ namespace eduHub.Infrastructure.Services
             if (!roomExists)
                 throw new InvalidOperationException("Room does not exist.");
 
-            await EnsureNoConflicts(targetRoomId, startUtc, endUtc, reservation.Id);
+            await _availabilityService.ValidateReservationAsync(
+                targetRoomId,
+                startUtc,
+                endUtc,
+                reservation.Id);
 
             reservation.RoomId = targetRoomId;
             reservation.StartTimeUtc = startUtc;
             reservation.EndTimeUtc = endUtc;
             reservation.Purpose = dto.Purpose;
+            if (reservation.Status == ReservationStatus.Pending &&
+                _policy.PendingExpiryHours > 0)
+            {
+                reservation.ExpiresAtUtc =
+                    DateTimeOffset.UtcNow.AddHours(_policy.PendingExpiryHours);
+            }
 
             try
             {
@@ -227,6 +246,13 @@ namespace eduHub.Infrastructure.Services
             if (reservation == null)
                 throw new KeyNotFoundException("Reservation not found.");
 
+            if (reservation.Status == ReservationStatus.Pending &&
+                reservation.ExpiresAtUtc.HasValue &&
+                reservation.ExpiresAtUtc.Value <= DateTimeOffset.UtcNow)
+            {
+                throw new InvalidOperationException("Reservation has expired.");
+            }
+
             if (reservation.Status == ReservationStatus.Approved)
                 return MapToDto(reservation);
 
@@ -234,6 +260,7 @@ namespace eduHub.Infrastructure.Services
                 throw new InvalidOperationException("Only pending reservations can be approved.");
 
             reservation.Status = ReservationStatus.Approved;
+            reservation.ExpiresAtUtc = null;
             await _context.SaveChangesAsync();
 
             AddAuditLog("ReservationApproved", "Reservation", reservation.Id.ToString(), approverUserId, reservation.Purpose);
@@ -257,37 +284,13 @@ namespace eduHub.Infrastructure.Services
                 throw new InvalidOperationException("Only pending reservations can be rejected.");
 
             reservation.Status = ReservationStatus.Rejected;
+            reservation.ExpiresAtUtc = null;
             await _context.SaveChangesAsync();
 
             AddAuditLog("ReservationRejected", "Reservation", reservation.Id.ToString(), approverUserId, reservation.Purpose);
             await _context.SaveChangesAsync();
 
             return MapToDto(reservation);
-        }
-
-        private async Task EnsureNoConflicts(
-            int roomId,
-            DateTimeOffset startUtc,
-            DateTimeOffset endUtc,
-            int? excludeReservationId)
-        {
-            if (endUtc <= startUtc)
-                throw new InvalidOperationException("End time must be after start time.");
-
-            var query = _context.Reservations
-                .AsNoTracking()
-                .Where(r => r.RoomId == roomId &&
-                            (r.Status == ReservationStatus.Pending || r.Status == ReservationStatus.Approved));
-
-            if (excludeReservationId.HasValue)
-                query = query.Where(r => r.Id != excludeReservationId.Value);
-
-            var hasConflict = await query.AnyAsync(r =>
-                r.StartTimeUtc < endUtc &&
-                startUtc < r.EndTimeUtc);
-
-            if (hasConflict)
-                throw new InvalidOperationException("The room is already reserved in the given time range.");
         }
 
         private void AddAuditLog(string action, string entityType, string entityId, int userId, string? summary)
@@ -312,6 +315,15 @@ namespace eduHub.Infrastructure.Services
 
         private static ReservationResponseDto MapToDto(Reservation reservation)
         {
+            var now = DateTimeOffset.UtcNow;
+            var status = reservation.Status.ToString();
+            if (reservation.Status == ReservationStatus.Pending &&
+                reservation.ExpiresAtUtc.HasValue &&
+                reservation.ExpiresAtUtc.Value <= now)
+            {
+                status = "Expired";
+            }
+
             return new ReservationResponseDto
             {
                 Id = reservation.Id,
@@ -319,7 +331,7 @@ namespace eduHub.Infrastructure.Services
                 Start = reservation.StartTimeUtc,
                 End = reservation.EndTimeUtc,
                 Purpose = reservation.Purpose,
-                Status = reservation.Status.ToString(),
+                Status = status,
                 CreatedByUserId = reservation.CreatedByUserId,
                 CreatedAtUtc = reservation.CreatedAtUtc
             };

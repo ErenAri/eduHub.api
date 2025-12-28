@@ -101,7 +101,7 @@ public class TenantController : ApiControllerBase
         }
 
         _cache.Remove(CachePrefix + tokenHash);
-        if (entry.ExpiresAtUtc <= DateTimeOffset.UtcNow)
+        if (entry == null || entry.ExpiresAtUtc <= DateTimeOffset.UtcNow)
         {
             await ApplyJitterAsync();
             return Ok(new TenantResolveResponseDto());
@@ -112,7 +112,7 @@ public class TenantController : ApiControllerBase
         return Ok(new TenantResolveResponseDto { Tenants = tenants });
     }
 
-    private async Task<TenantSummaryDto[]> GetTenantsForEmailAsync(string normalizedEmail)
+    private async Task<List<TenantSummaryDto>> GetTenantsForEmailAsync(string normalizedEmail)
     {
         var now = DateTimeOffset.UtcNow;
 
@@ -149,7 +149,7 @@ public class TenantController : ApiControllerBase
                 Slug = org.Slug,
                 LogoUrl = org.LogoUrl
             })
-            .ToArrayAsync();
+            .ToListAsync();
     }
 
     private static async Task ApplyJitterAsync()

@@ -31,8 +31,14 @@ public class AppDbContext : DbContext
     public DbSet<OrganizationInvite> OrganizationInvites => Set<OrganizationInvite>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Building> Buildings => Set<Building>();
+    public DbSet<BuildingAvailabilityWindow> BuildingAvailabilityWindows =>
+        Set<BuildingAvailabilityWindow>();
     public DbSet<Room> Rooms => Set<Room>();
+    public DbSet<RoomAvailabilityWindow> RoomAvailabilityWindows =>
+        Set<RoomAvailabilityWindow>();
     public DbSet<Reservation> Reservations => Set<Reservation>();
+    public DbSet<AvailabilityBlackout> AvailabilityBlackouts =>
+        Set<AvailabilityBlackout>();
     public DbSet<User> Users { get; set; } = null!;
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<RevokedToken> RevokedTokens => Set<RevokedToken>();
@@ -267,6 +273,41 @@ public class AppDbContext : DbContext
                 (_tenant.IsPlatformScope || b.OrganizationId == _tenant.OrganizationId));
         });
 
+        modelBuilder.Entity<BuildingAvailabilityWindow>(entity =>
+        {
+            entity.ToTable("building_availability_windows");
+            entity.HasKey(w => w.Id);
+
+            entity.Property(w => w.DayOfWeek)
+                .HasConversion<int>()
+                .IsRequired();
+
+            entity.Property(w => w.StartMinute)
+                .IsRequired();
+
+            entity.Property(w => w.EndMinute)
+                .IsRequired();
+
+            entity.Property(w => w.OrganizationId)
+                .IsRequired();
+
+            entity.HasOne(w => w.Building)
+                .WithMany(b => b.AvailabilityWindows)
+                .HasForeignKey(w => w.BuildingId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(w => w.Organization)
+                .WithMany()
+                .HasForeignKey(w => w.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(w => new { w.BuildingId, w.DayOfWeek })
+                .HasDatabaseName("IX_building_availability_windows_BuildingId_DayOfWeek");
+
+            entity.HasQueryFilter(w =>
+                _tenant.IsPlatformScope || w.OrganizationId == _tenant.OrganizationId);
+        });
+
         modelBuilder.Entity<Room>(entity =>
         {
             entity.ToTable("rooms");
@@ -310,6 +351,41 @@ public class AppDbContext : DbContext
                 (_tenant.IsPlatformScope || r.OrganizationId == _tenant.OrganizationId));
         });
 
+        modelBuilder.Entity<RoomAvailabilityWindow>(entity =>
+        {
+            entity.ToTable("room_availability_windows");
+            entity.HasKey(w => w.Id);
+
+            entity.Property(w => w.DayOfWeek)
+                .HasConversion<int>()
+                .IsRequired();
+
+            entity.Property(w => w.StartMinute)
+                .IsRequired();
+
+            entity.Property(w => w.EndMinute)
+                .IsRequired();
+
+            entity.Property(w => w.OrganizationId)
+                .IsRequired();
+
+            entity.HasOne(w => w.Room)
+                .WithMany(r => r.AvailabilityWindows)
+                .HasForeignKey(w => w.RoomId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(w => w.Organization)
+                .WithMany()
+                .HasForeignKey(w => w.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(w => new { w.RoomId, w.DayOfWeek })
+                .HasDatabaseName("IX_room_availability_windows_RoomId_DayOfWeek");
+
+            entity.HasQueryFilter(w =>
+                _tenant.IsPlatformScope || w.OrganizationId == _tenant.OrganizationId);
+        });
+
         modelBuilder.Entity<Reservation>(entity =>
         {
             entity.ToTable("reservations");
@@ -325,6 +401,9 @@ public class AppDbContext : DbContext
 
             entity.Property(r => r.CreatedAtUtc)
                 .IsRequired()
+                .HasColumnType("timestamp with time zone");
+
+            entity.Property(r => r.ExpiresAtUtc)
                 .HasColumnType("timestamp with time zone");
 
             entity.Property(r => r.Purpose)
@@ -365,6 +444,56 @@ public class AppDbContext : DbContext
             entity.HasQueryFilter(r =>
                 !r.IsDeleted &&
                 (_tenant.IsPlatformScope || r.OrganizationId == _tenant.OrganizationId));
+        });
+
+        modelBuilder.Entity<AvailabilityBlackout>(entity =>
+        {
+            entity.ToTable("availability_blackouts");
+            entity.HasKey(b => b.Id);
+
+            entity.Property(b => b.OrganizationId)
+                .IsRequired();
+
+            entity.Property(b => b.StartTimeUtc)
+                .IsRequired()
+                .HasColumnType("timestamp with time zone");
+
+            entity.Property(b => b.EndTimeUtc)
+                .IsRequired()
+                .HasColumnType("timestamp with time zone");
+
+            entity.Property(b => b.Reason)
+                .HasMaxLength(500);
+
+            entity.Property(b => b.CreatedAtUtc)
+                .IsRequired()
+                .HasColumnType("timestamp with time zone");
+
+            entity.HasOne(b => b.Building)
+                .WithMany()
+                .HasForeignKey(b => b.BuildingId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(b => b.Room)
+                .WithMany()
+                .HasForeignKey(b => b.RoomId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(b => b.Organization)
+                .WithMany()
+                .HasForeignKey(b => b.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(b => b.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(b => b.CreatedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(b => new { b.OrganizationId, b.StartTimeUtc })
+                .HasDatabaseName("IX_availability_blackouts_OrganizationId_StartTimeUtc");
+
+            entity.HasQueryFilter(b =>
+                _tenant.IsPlatformScope || b.OrganizationId == _tenant.OrganizationId);
         });
 
         modelBuilder.Entity<User>(entity =>

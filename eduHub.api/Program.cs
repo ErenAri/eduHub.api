@@ -3,6 +3,7 @@ using eduHub.api.HostedServices;
 using eduHub.api.Middleware;
 using eduHub.api.Options;
 using eduHub.Application.Interfaces.Tenants;
+using eduHub.Application.Options;
 using eduHub.Application.Validators.Users;
 using eduHub.Domain.Enums;
 using eduHub.Infrastructure;
@@ -156,6 +157,20 @@ builder.Services.AddOptions<JwtOptions>()
         "Jwt:AccessTokenMinutes must be between 5 and 60.")
     .Validate(options => options.RefreshTokenDays is >= 1 and <= 90,
         "Jwt:RefreshTokenDays must be between 1 and 90.")
+    .ValidateOnStart();
+
+builder.Services.AddOptions<ReservationPolicyOptions>()
+    .Bind(builder.Configuration.GetSection(ReservationPolicyOptions.SectionName))
+    .Validate(options => options.LeadTimeMinutes >= 0,
+        "Reservations:Policy:LeadTimeMinutes must be 0 or greater.")
+    .Validate(options => options.MaxAdvanceDays >= 1,
+        "Reservations:Policy:MaxAdvanceDays must be 1 or greater.")
+    .Validate(options => options.MaxDurationMinutes >= 15,
+        "Reservations:Policy:MaxDurationMinutes must be at least 15.")
+    .Validate(options => options.BufferMinutes >= 0,
+        "Reservations:Policy:BufferMinutes must be 0 or greater.")
+    .Validate(options => options.PendingExpiryHours >= 1,
+        "Reservations:Policy:PendingExpiryHours must be 1 or greater.")
     .ValidateOnStart();
 
 builder.Services

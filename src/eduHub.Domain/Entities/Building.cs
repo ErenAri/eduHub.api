@@ -12,4 +12,6 @@ public class Building : ITenantScoped
     public Organization Organization { get; set; } = null!;
     public bool IsDeleted { get; set; }
     public ICollection<Room> Rooms { get; set; } = new List<Room>();
+    public ICollection<BuildingAvailabilityWindow> AvailabilityWindows { get; set; } =
+        new List<BuildingAvailabilityWindow>();
 }

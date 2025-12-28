@@ -1,3 +1,4 @@
+using eduHub.Application.Interfaces.Availability;
 using eduHub.Application.Interfaces.Buildings;
 using eduHub.Application.Interfaces.Organizations;
 using eduHub.Application.Interfaces.Reservations;
@@ -33,6 +34,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICurrentTenantSetter>(sp => sp.GetRequiredService<CurrentTenant>());
 
         services.AddScoped<IBuildingService, BuildingService>();
+        services.AddScoped<IAvailabilityService, AvailabilityService>();
         services.AddScoped<IOrganizationService, OrganizationService>();
         services.AddScoped<IOrganizationInviteService, OrganizationInviteService>();
         services.AddScoped<IRoomService, RoomService>();

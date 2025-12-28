@@ -1,7 +1,7 @@
 using eduHub.Application.Common;
+using eduHub.Application.Interfaces.Availability;
 using eduHub.Application.Interfaces.Rooms;
 using eduHub.Domain.Entities;
-using eduHub.Domain.Enums;
 using eduHub.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,9 +10,12 @@ namespace eduHub.Infrastructure.Services;
 public class RoomService : IRoomService
 {
     private readonly AppDbContext _context;
-    public RoomService(AppDbContext context)
+    private readonly IAvailabilityService _availabilityService;
+
+    public RoomService(AppDbContext context, IAvailabilityService availabilityService)
     {
         _context = context;
+        _availabilityService = availabilityService;
     }
 
     public async Task<List<Room>> GetByBuildingAsync(int buildingId)
@@ -76,14 +79,19 @@ public class RoomService : IRoomService
         var startUtc = startTimeUtc.ToUniversalTime();
         var endUtc = endTimeUtc.ToUniversalTime();
 
-        return await _context.Rooms
-            .Where(r => r.BuildingId == buildingId)
-            .Where(r => !r.Reservations.Any(res =>
-                (res.Status == ReservationStatus.Pending || res.Status == ReservationStatus.Approved) &&
-                res.StartTimeUtc < endUtc &&
-                res.EndTimeUtc > startUtc))
+        var rooms = await _context.Rooms
             .AsNoTracking()
+            .Where(r => r.BuildingId == buildingId)
             .ToListAsync();
+
+        var available = new List<Room>();
+        foreach (var room in rooms)
+        {
+            if (await _availabilityService.IsRoomAvailableAsync(room.Id, startUtc, endUtc))
+                available.Add(room);
+        }
+
+        return available;
     }
 
     public async Task<CursorPageResult<Room>> GetByBuildingIdPagedAsync(int buildingId, int pageSize, string? cursor)

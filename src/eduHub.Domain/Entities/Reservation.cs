@@ -16,6 +16,7 @@ public class Reservation : ITenantScoped
     public int? CreatedByUserId { get; set; }
     public User? CreatedByUser { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset? ExpiresAtUtc { get; set; }
     public bool IsDeleted { get; set; }
     public Guid OrganizationId { get; set; }
     public Organization Organization { get; set; } = null!;
