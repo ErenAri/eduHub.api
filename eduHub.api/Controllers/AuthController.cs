@@ -31,7 +31,7 @@ public class AuthController : ApiControllerBase
     {
         var conflictErrors = await GetRegistrationConflictsAsync(dto);
         if (conflictErrors.Count > 0)
-            return ValidationProblem(conflictErrors);
+            return ValidationProblem(new ValidationProblemDetails(conflictErrors));
 
         try
         {
@@ -42,7 +42,7 @@ public class AuthController : ApiControllerBase
         {
             conflictErrors = await GetRegistrationConflictsAsync(dto);
             if (conflictErrors.Count > 0)
-                return ValidationProblem(conflictErrors);
+                return ValidationProblem(new ValidationProblemDetails(conflictErrors));
 
             return BadRequestProblem("Unable to register.");
         }
