@@ -69,6 +69,7 @@ builder.Services.AddCors(options =>
 // =======================================
 
 builder.Services.AddControllers();
+builder.Services.AddMemoryCache();
 
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<UserRegisterDtoValidator>();
