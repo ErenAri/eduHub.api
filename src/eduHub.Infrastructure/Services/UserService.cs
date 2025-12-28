@@ -174,8 +174,26 @@ public class UserService : IUserService
         if (!await IsOrganizationActiveAsync(organizationId))
             return null;
 
-        var membership = await GetActiveMembershipAsync(user.Id, organizationId);
+        var membership = await _context.OrganizationMembers
+            .FirstOrDefaultAsync(m =>
+                m.OrganizationId == organizationId &&
+                m.UserId == user.Id);
+
         if (membership == null)
+        {
+            membership = new OrganizationMember
+            {
+                OrganizationId = organizationId,
+                UserId = user.Id,
+                Role = OrganizationMemberRole.User,
+                Status = OrganizationMemberStatus.Active,
+                JoinedAtUtc = DateTimeOffset.UtcNow
+            };
+            _context.OrganizationMembers.Add(membership);
+            await _context.SaveChangesAsync();
+        }
+
+        if (membership.Status != OrganizationMemberStatus.Active)
             return null;
 
         return await IssueTokensAsync(user, organizationId, membership.Role);
