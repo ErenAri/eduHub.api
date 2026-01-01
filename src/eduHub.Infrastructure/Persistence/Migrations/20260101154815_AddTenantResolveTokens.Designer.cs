@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using eduHub.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using eduHub.Infrastructure.Persistence;
 namespace eduHub.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260101154815_AddTenantResolveTokens")]
+    partial class AddTenantResolveTokens
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -175,49 +178,6 @@ namespace eduHub.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("IX_building_availability_windows_BuildingId_DayOfWeek");
 
                     b.ToTable("building_availability_windows", (string)null);
-                });
-
-            modelBuilder.Entity("eduHub.Domain.Entities.GuestReservationToken", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("CreatedFromIp")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateTimeOffset>("ExpiresAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("OrganizationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("TokenHash")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
-
-                    b.Property<DateTimeOffset?>("VerifiedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TokenHash")
-                        .IsUnique()
-                        .HasDatabaseName("IX_guest_reservation_tokens_TokenHash");
-
-                    b.HasIndex("OrganizationId", "Email")
-                        .HasDatabaseName("IX_guest_reservation_tokens_OrganizationId_Email");
-
-                    b.ToTable("guest_reservation_tokens", (string)null);
                 });
 
             modelBuilder.Entity("eduHub.Domain.Entities.Organization", b =>
@@ -409,10 +369,6 @@ namespace eduHub.Infrastructure.Persistence.Migrations
 
                     b.Property<DateTimeOffset?>("ExpiresAtUtc")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("GuestEmail")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
 
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
@@ -710,17 +666,6 @@ namespace eduHub.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Building");
-
-                    b.Navigation("Organization");
-                });
-
-            modelBuilder.Entity("eduHub.Domain.Entities.GuestReservationToken", b =>
-                {
-                    b.HasOne("eduHub.Domain.Entities.Organization", "Organization")
-                        .WithMany()
-                        .HasForeignKey("OrganizationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
 
                     b.Navigation("Organization");
                 });

@@ -142,6 +142,7 @@ namespace eduHub.Infrastructure.Services
             var startUtc = dto.StartTimeUtc.ToUniversalTime();
             var endUtc = dto.EndTimeUtc.ToUniversalTime();
 
+            await EnsurePendingLimitAsync(createdByUserId, null);
             await _availabilityService.ValidateReservationAsync(dto.RoomId, startUtc, endUtc);
 
             var reservation = new Reservation
@@ -152,10 +153,49 @@ namespace eduHub.Infrastructure.Services
                 Purpose = dto.Purpose,
                 Status = ReservationStatus.Pending,
                 CreatedByUserId = createdByUserId,
+                GuestEmail = null,
                 CreatedAtUtc = DateTimeOffset.UtcNow,
-                ExpiresAtUtc = _policy.PendingExpiryHours > 0
-                    ? DateTimeOffset.UtcNow.AddHours(_policy.PendingExpiryHours)
-                    : null
+                ExpiresAtUtc = GetPendingExpiry(startUtc)
+            };
+
+            _context.Reservations.Add(reservation);
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: "23P01" })
+            {
+                throw new InvalidOperationException("The room is already reserved in the given time range.");
+            }
+
+            return MapToDto(reservation);
+        }
+
+        public async Task<ReservationResponseDto> CreateGuestAsync(
+            ReservationCreateDto dto,
+            string guestEmail)
+        {
+            if (string.IsNullOrWhiteSpace(guestEmail))
+                throw new InvalidOperationException("Guest email is required.");
+
+            var startUtc = dto.StartTimeUtc.ToUniversalTime();
+            var endUtc = dto.EndTimeUtc.ToUniversalTime();
+            var normalizedEmail = NormalizeEmail(guestEmail);
+
+            await EnsurePendingLimitAsync(null, normalizedEmail);
+            await _availabilityService.ValidateReservationAsync(dto.RoomId, startUtc, endUtc);
+
+            var reservation = new Reservation
+            {
+                RoomId = dto.RoomId,
+                StartTimeUtc = startUtc,
+                EndTimeUtc = endUtc,
+                Purpose = dto.Purpose,
+                Status = ReservationStatus.Pending,
+                CreatedByUserId = null,
+                GuestEmail = normalizedEmail,
+                CreatedAtUtc = DateTimeOffset.UtcNow,
+                ExpiresAtUtc = GetPendingExpiry(startUtc)
             };
 
             _context.Reservations.Add(reservation);
@@ -202,11 +242,9 @@ namespace eduHub.Infrastructure.Services
             reservation.StartTimeUtc = startUtc;
             reservation.EndTimeUtc = endUtc;
             reservation.Purpose = dto.Purpose;
-            if (reservation.Status == ReservationStatus.Pending &&
-                _policy.PendingExpiryHours > 0)
+            if (reservation.Status == ReservationStatus.Pending)
             {
-                reservation.ExpiresAtUtc =
-                    DateTimeOffset.UtcNow.AddHours(_policy.PendingExpiryHours);
+                reservation.ExpiresAtUtc = GetPendingExpiry(startUtc);
             }
 
             try
@@ -258,6 +296,17 @@ namespace eduHub.Infrastructure.Services
 
             if (reservation.Status != ReservationStatus.Pending)
                 throw new InvalidOperationException("Only pending reservations can be approved.");
+
+            var hasConflict = await _context.Reservations
+                .AsNoTracking()
+                .AnyAsync(r =>
+                    r.Id != reservation.Id &&
+                    r.RoomId == reservation.RoomId &&
+                    r.Status == ReservationStatus.Approved &&
+                    r.StartTimeUtc < reservation.EndTimeUtc &&
+                    r.EndTimeUtc > reservation.StartTimeUtc);
+            if (hasConflict)
+                throw new InvalidOperationException("The room is already reserved in the given time range.");
 
             reservation.Status = ReservationStatus.Approved;
             reservation.ExpiresAtUtc = null;
@@ -312,6 +361,43 @@ namespace eduHub.Infrastructure.Services
             if (pageSize > 100) return 100;
             return pageSize;
         }
+
+        private DateTimeOffset? GetPendingExpiry(DateTimeOffset startUtc)
+        {
+            return startUtc;
+        }
+
+        private async Task EnsurePendingLimitAsync(int? userId, string? guestEmail)
+        {
+            if (_policy.MaxPendingPerUser <= 0)
+                return;
+
+            var now = DateTimeOffset.UtcNow;
+            var query = _context.Reservations
+                .AsNoTracking()
+                .Where(r => r.Status == ReservationStatus.Pending)
+                .Where(r => r.ExpiresAtUtc == null || r.ExpiresAtUtc > now);
+
+            if (userId.HasValue)
+            {
+                query = query.Where(r => r.CreatedByUserId == userId.Value);
+            }
+            else if (!string.IsNullOrWhiteSpace(guestEmail))
+            {
+                query = query.Where(r => r.GuestEmail == guestEmail);
+            }
+            else
+            {
+                return;
+            }
+
+            var count = await query.CountAsync();
+            if (count >= _policy.MaxPendingPerUser)
+                throw new InvalidOperationException("Pending reservation limit reached.");
+        }
+
+        private static string NormalizeEmail(string email) =>
+            email.Trim().ToLowerInvariant();
 
         private static ReservationResponseDto MapToDto(Reservation reservation)
         {

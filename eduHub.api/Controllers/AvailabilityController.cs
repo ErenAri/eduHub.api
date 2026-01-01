@@ -66,6 +66,7 @@ public class AvailabilityController : ApiControllerBase
     }
 
     [HttpGet("rooms/{roomId:int}/slots")]
+    [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<AvailabilitySlotDto>>> GetRoomAvailability(
         int roomId,

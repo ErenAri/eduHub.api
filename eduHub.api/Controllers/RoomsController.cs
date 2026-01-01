@@ -22,6 +22,7 @@ public class RoomsController : ApiControllerBase
     }
 
     [HttpGet("by-building/{buildingId:int}")]
+    [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult<CursorPageResponse<RoomResponseDto>>> GetRoomsByBuilding(
         int buildingId,
@@ -49,6 +50,7 @@ public class RoomsController : ApiControllerBase
     }
 
     [HttpGet("{id:int}")]
+    [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<RoomResponseDto>> GetRoomById(int id)

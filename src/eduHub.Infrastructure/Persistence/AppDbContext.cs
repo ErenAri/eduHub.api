@@ -39,6 +39,10 @@ public class AppDbContext : DbContext
     public DbSet<Reservation> Reservations => Set<Reservation>();
     public DbSet<AvailabilityBlackout> AvailabilityBlackouts =>
         Set<AvailabilityBlackout>();
+    public DbSet<TenantResolveToken> TenantResolveTokens =>
+        Set<TenantResolveToken>();
+    public DbSet<GuestReservationToken> GuestReservationTokens =>
+        Set<GuestReservationToken>();
     public DbSet<User> Users { get; set; } = null!;
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<RevokedToken> RevokedTokens => Set<RevokedToken>();
@@ -414,6 +418,9 @@ public class AppDbContext : DbContext
                 .HasConversion<int>()
                 .IsRequired();
 
+            entity.Property(r => r.GuestEmail)
+                .HasMaxLength(200);
+
             entity.Property(r => r.OrganizationId)
                 .IsRequired();
 
@@ -494,6 +501,84 @@ public class AppDbContext : DbContext
 
             entity.HasQueryFilter(b =>
                 _tenant.IsPlatformScope || b.OrganizationId == _tenant.OrganizationId);
+        });
+
+        modelBuilder.Entity<TenantResolveToken>(entity =>
+        {
+            entity.ToTable("tenant_resolve_tokens");
+            entity.HasKey(t => t.Id);
+
+            entity.Property(t => t.Email)
+                .IsRequired()
+                .HasMaxLength(200);
+
+            entity.Property(t => t.TokenHash)
+                .IsRequired()
+                .HasMaxLength(256);
+
+            entity.Property(t => t.CreatedAtUtc)
+                .IsRequired()
+                .HasColumnType("timestamp with time zone");
+
+            entity.Property(t => t.ExpiresAtUtc)
+                .IsRequired()
+                .HasColumnType("timestamp with time zone");
+
+            entity.Property(t => t.UsedAtUtc)
+                .HasColumnType("timestamp with time zone");
+
+            entity.Property(t => t.CreatedFromIp)
+                .HasMaxLength(64);
+
+            entity.HasIndex(t => t.TokenHash)
+                .IsUnique()
+                .HasDatabaseName("IX_tenant_resolve_tokens_TokenHash");
+
+            entity.HasIndex(t => t.Email)
+                .HasDatabaseName("IX_tenant_resolve_tokens_Email");
+        });
+
+        modelBuilder.Entity<GuestReservationToken>(entity =>
+        {
+            entity.ToTable("guest_reservation_tokens");
+            entity.HasKey(t => t.Id);
+
+            entity.Property(t => t.Email)
+                .IsRequired()
+                .HasMaxLength(200);
+
+            entity.Property(t => t.TokenHash)
+                .IsRequired()
+                .HasMaxLength(256);
+
+            entity.Property(t => t.CreatedAtUtc)
+                .IsRequired()
+                .HasColumnType("timestamp with time zone");
+
+            entity.Property(t => t.ExpiresAtUtc)
+                .IsRequired()
+                .HasColumnType("timestamp with time zone");
+
+            entity.Property(t => t.VerifiedAtUtc)
+                .HasColumnType("timestamp with time zone");
+
+            entity.Property(t => t.OrganizationId)
+                .IsRequired();
+
+            entity.HasIndex(t => t.TokenHash)
+                .IsUnique()
+                .HasDatabaseName("IX_guest_reservation_tokens_TokenHash");
+
+            entity.HasIndex(t => new { t.OrganizationId, t.Email })
+                .HasDatabaseName("IX_guest_reservation_tokens_OrganizationId_Email");
+
+            entity.HasOne(t => t.Organization)
+                .WithMany()
+                .HasForeignKey(t => t.OrganizationId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasQueryFilter(t =>
+                _tenant.IsPlatformScope || t.OrganizationId == _tenant.OrganizationId);
         });
 
         modelBuilder.Entity<User>(entity =>

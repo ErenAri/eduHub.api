@@ -41,6 +41,13 @@ public sealed class TenantResolutionMiddleware
             return;
         }
 
+        if (path.StartsWithSegments("/api/tenant", StringComparison.OrdinalIgnoreCase))
+        {
+            tenantSetter.SetPlatformScope();
+            await _next(context);
+            return;
+        }
+
         if (path.StartsWithSegments("/api/org", StringComparison.OrdinalIgnoreCase))
         {
             var slug = ResolveTenantSlug(context);

@@ -3,12 +3,15 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using eduHub.Application.DTOs.Buildings;
 using eduHub.Application.DTOs.Organizations;
 using eduHub.Application.DTOs.Reservations;
 using eduHub.Application.DTOs.Rooms;
+using eduHub.Application.DTOs.Tenants;
 using eduHub.Application.DTOs.Users;
 using eduHub.Application.Interfaces.Tenants;
 using eduHub.Domain.Entities;
@@ -35,7 +38,7 @@ public class ApiEndpointTests
     public async Task Health_Live_ReturnsOk()
     {
         await _fixture.ResetDatabaseAsync();
-        using var client = _fixture.CreateClient();
+        using var client = _fixture.CreateClient(forwardedFor: NextClientIp());
 
         var response = await client.GetAsync("/health/live");
 
@@ -46,11 +49,134 @@ public class ApiEndpointTests
     public async Task Health_Ready_RequiresAuth()
     {
         await _fixture.ResetDatabaseAsync();
-        using var client = _fixture.CreateClient();
+        using var client = _fixture.CreateClient(forwardedFor: NextClientIp());
 
         var response = await client.GetAsync("/health/ready");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task TenantResolve_ReturnsTenant_ForKnownEmail()
+    {
+        await _fixture.ResetDatabaseAsync();
+
+        var email = $"resolve-{Guid.NewGuid():N}@example.com";
+        var org = await EnsureOrganizationAsync("resolve");
+        await CreateUserAsync(UserRole.User, OrganizationMemberRole.User, org.Id, NewPassword(), email);
+
+        using var client = _fixture.CreateClient(forwardedFor: NextClientIp());
+        var resolveResponse = await client.PostAsJsonAsync(
+            "/api/tenant/resolve",
+            new TenantResolveRequestDto { Email = email });
+
+        Assert.Equal(HttpStatusCode.OK, resolveResponse.StatusCode);
+        var resolve = await resolveResponse.Content.ReadFromJsonAsync<TenantResolveRequestResponseDto>();
+        Assert.NotNull(resolve);
+        Assert.True(resolve!.VerificationSent);
+        Assert.False(string.IsNullOrWhiteSpace(resolve.DebugToken));
+
+        var verifyResponse = await client.PostAsJsonAsync(
+            "/api/tenant/resolve/verify",
+            new TenantResolveVerifyRequestDto { Token = resolve.DebugToken! });
+
+        Assert.Equal(HttpStatusCode.OK, verifyResponse.StatusCode);
+        var verify = await verifyResponse.Content.ReadFromJsonAsync<TenantResolveResponseDto>();
+        Assert.NotNull(verify);
+        Assert.Contains(verify!.Tenants, tenant => tenant.Id == org.Id);
+    }
+
+    [Fact]
+    public async Task TenantResolve_Token_IsSingleUse()
+    {
+        await _fixture.ResetDatabaseAsync();
+
+        var email = $"resolve-{Guid.NewGuid():N}@example.com";
+        var org = await EnsureOrganizationAsync("resolve-single");
+        await CreateUserAsync(UserRole.User, OrganizationMemberRole.User, org.Id, NewPassword(), email);
+
+        using var client = _fixture.CreateClient(forwardedFor: NextClientIp());
+        var resolveResponse = await client.PostAsJsonAsync(
+            "/api/tenant/resolve",
+            new TenantResolveRequestDto { Email = email });
+
+        var resolve = await resolveResponse.Content.ReadFromJsonAsync<TenantResolveRequestResponseDto>();
+        Assert.NotNull(resolve);
+        Assert.False(string.IsNullOrWhiteSpace(resolve!.DebugToken));
+
+        await client.PostAsJsonAsync(
+            "/api/tenant/resolve/verify",
+            new TenantResolveVerifyRequestDto { Token = resolve.DebugToken! });
+
+        var secondVerifyResponse = await client.PostAsJsonAsync(
+            "/api/tenant/resolve/verify",
+            new TenantResolveVerifyRequestDto { Token = resolve.DebugToken! });
+
+        Assert.Equal(HttpStatusCode.OK, secondVerifyResponse.StatusCode);
+        var secondVerify = await secondVerifyResponse.Content.ReadFromJsonAsync<TenantResolveResponseDto>();
+        Assert.NotNull(secondVerify);
+        Assert.Empty(secondVerify!.Tenants);
+    }
+
+    [Fact]
+    public async Task TenantResolve_InvalidEmail_ReturnsBadRequest()
+    {
+        await _fixture.ResetDatabaseAsync();
+
+        using var client = _fixture.CreateClient(forwardedFor: NextClientIp());
+        var response = await client.PostAsJsonAsync(
+            "/api/tenant/resolve",
+            new TenantResolveRequestDto { Email = "not-an-email" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task TenantResolve_UnknownToken_ReturnsEmpty()
+    {
+        await _fixture.ResetDatabaseAsync();
+
+        using var client = _fixture.CreateClient();
+        var verifyResponse = await client.PostAsJsonAsync(
+            "/api/tenant/resolve/verify",
+            new TenantResolveVerifyRequestDto { Token = $"missing-{Guid.NewGuid():N}" });
+
+        Assert.Equal(HttpStatusCode.OK, verifyResponse.StatusCode);
+        var verify = await verifyResponse.Content.ReadFromJsonAsync<TenantResolveResponseDto>();
+        Assert.NotNull(verify);
+        Assert.Empty(verify!.Tenants);
+    }
+
+    [Fact]
+    public async Task TenantResolve_ExpiredToken_ReturnsEmpty()
+    {
+        await _fixture.ResetDatabaseAsync();
+
+        var token = $"expired-{Guid.NewGuid():N}";
+        var email = $"expired-{Guid.NewGuid():N}@example.com";
+        using (var scope = _fixture.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.TenantResolveTokens.Add(new TenantResolveToken
+            {
+                Id = Guid.NewGuid(),
+                Email = email.ToLowerInvariant(),
+                TokenHash = HashToken(token),
+                CreatedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-20),
+                ExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(-10)
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var client = _fixture.CreateClient();
+        var verifyResponse = await client.PostAsJsonAsync(
+            "/api/tenant/resolve/verify",
+            new TenantResolveVerifyRequestDto { Token = token });
+
+        Assert.Equal(HttpStatusCode.OK, verifyResponse.StatusCode);
+        var verify = await verifyResponse.Content.ReadFromJsonAsync<TenantResolveResponseDto>();
+        Assert.NotNull(verify);
+        Assert.Empty(verify!.Tenants);
     }
 
     [Fact]
@@ -126,7 +252,7 @@ public class ApiEndpointTests
         var userAuth = await LoginAsync(userClient, user.UserName, userPassword);
         SetBearer(userClient, userAuth.AccessToken);
 
-        var start = DateTimeOffset.UtcNow.AddHours(1);
+        var start = DateTimeOffset.UtcNow.AddHours(2);
         var end = start.AddHours(1);
         var dto = new ReservationCreateDto
         {
@@ -237,7 +363,7 @@ public class ApiEndpointTests
         SetBearer(clientB, auth.AccessToken);
 
         var response = await clientB.GetAsync($"/api/org/buildings/{building.Id}");
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]
@@ -278,14 +404,22 @@ public class ApiEndpointTests
         return $"Pass-{Guid.NewGuid():N}!";
     }
 
+    private static string HashToken(string token)
+    {
+        using var sha256 = SHA256.Create();
+        var hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(token));
+        return Convert.ToHexString(hash);
+    }
+
     private async Task<User> CreateUserAsync(
         UserRole role,
         OrganizationMemberRole orgRole,
         Guid organizationId,
-        string password)
+        string password,
+        string? emailOverride = null)
     {
         var userName = $"{role.ToString().ToLowerInvariant()}-{Guid.NewGuid():N}";
-        var email = $"{userName}@example.com";
+        var email = emailOverride ?? $"{userName}@example.com";
         var user = new User
         {
             UserName = userName,

@@ -6,12 +6,12 @@ using System.Text;
 using System.Threading.Tasks;
 using eduHub.Application.DTOs.Tenants;
 using eduHub.Domain.Enums;
+using eduHub.Domain.Entities;
 using eduHub.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Hosting;
 
 namespace eduHub.api.Controllers;
@@ -20,20 +20,16 @@ namespace eduHub.api.Controllers;
 [Route("api/tenant")]
 public class TenantController : ApiControllerBase
 {
-    private const string CachePrefix = "tenant-resolve:";
     private static readonly TimeSpan VerificationTtl = TimeSpan.FromMinutes(10);
 
     private readonly AppDbContext _context;
-    private readonly IMemoryCache _cache;
     private readonly IHostEnvironment _environment;
 
     public TenantController(
         AppDbContext context,
-        IMemoryCache cache,
         IHostEnvironment environment)
     {
         _context = context;
-        _cache = cache;
         _environment = environment;
     }
 
@@ -57,18 +53,18 @@ public class TenantController : ApiControllerBase
         var token = GenerateToken();
         var tokenHash = HashToken(token);
 
-        _cache.Set(
-            CachePrefix + tokenHash,
-            new TenantResolveEntry
-            {
-                Email = normalizedEmail,
-                CreatedAtUtc = now,
-                ExpiresAtUtc = now.Add(VerificationTtl)
-            },
-            new MemoryCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = VerificationTtl
-            });
+        await CleanupExpiredTokensAsync(now);
+
+        _context.TenantResolveTokens.Add(new TenantResolveToken
+        {
+            Id = Guid.NewGuid(),
+            Email = normalizedEmail,
+            TokenHash = tokenHash,
+            CreatedAtUtc = now,
+            ExpiresAtUtc = now.Add(VerificationTtl),
+            CreatedFromIp = HttpContext.Connection.RemoteIpAddress?.ToString()
+        });
+        await _context.SaveChangesAsync();
 
         await ApplyJitterAsync();
 
@@ -94,18 +90,28 @@ public class TenantController : ApiControllerBase
             return BadRequestProblem("Verification token is required.", "TokenRequired");
 
         var tokenHash = HashToken(token);
-        if (!_cache.TryGetValue(CachePrefix + tokenHash, out TenantResolveEntry? entry))
+
+        var now = DateTimeOffset.UtcNow;
+        await CleanupExpiredTokensAsync(now);
+
+        var entry = await _context.TenantResolveTokens
+            .FirstOrDefaultAsync(t => t.TokenHash == tokenHash);
+        if (entry == null)
         {
             await ApplyJitterAsync();
             return Ok(new TenantResolveResponseDto());
         }
 
-        _cache.Remove(CachePrefix + tokenHash);
-        if (entry == null || entry.ExpiresAtUtc <= DateTimeOffset.UtcNow)
+        if (entry.UsedAtUtc.HasValue || entry.ExpiresAtUtc <= now)
         {
+            _context.TenantResolveTokens.Remove(entry);
+            await _context.SaveChangesAsync();
             await ApplyJitterAsync();
             return Ok(new TenantResolveResponseDto());
         }
+
+        entry.UsedAtUtc = now;
+        await _context.SaveChangesAsync();
 
         var tenants = await GetTenantsForEmailAsync(entry.Email);
         await ApplyJitterAsync();
@@ -177,6 +183,13 @@ public class TenantController : ApiControllerBase
         return Convert.ToHexString(hash);
     }
 
+    private Task CleanupExpiredTokensAsync(DateTimeOffset now)
+    {
+        return _context.TenantResolveTokens
+            .Where(t => t.ExpiresAtUtc <= now || t.UsedAtUtc != null)
+            .ExecuteDeleteAsync();
+    }
+
     private static bool IsValidEmail(string email)
     {
         try
@@ -190,10 +203,4 @@ public class TenantController : ApiControllerBase
         }
     }
 
-    private sealed class TenantResolveEntry
-    {
-        public string Email { get; init; } = string.Empty;
-        public DateTimeOffset CreatedAtUtc { get; init; }
-        public DateTimeOffset ExpiresAtUtc { get; init; }
-    }
 }

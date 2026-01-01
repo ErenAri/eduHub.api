@@ -71,12 +71,23 @@ public sealed class TokenCleanupService : BackgroundService
             .Where(rt => rt.ExpiresAtUtc <= now)
             .ExecuteDeleteAsync(cancellationToken);
 
-        if (refreshDeleted > 0 || revokedDeleted > 0)
+        var tenantResolveDeleted = await db.TenantResolveTokens
+            .Where(t => t.ExpiresAtUtc <= now || t.UsedAtUtc != null)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        var guestDeleted = await db.GuestReservationTokens
+            .IgnoreQueryFilters()
+            .Where(t => t.ExpiresAtUtc <= now)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        if (refreshDeleted > 0 || revokedDeleted > 0 || tenantResolveDeleted > 0 || guestDeleted > 0)
         {
             _logger.LogInformation(
-                "Token cleanup removed {RefreshCount} refresh tokens and {RevokedCount} revoked tokens.",
+                "Token cleanup removed {RefreshCount} refresh tokens, {RevokedCount} revoked tokens, {ResolveCount} tenant resolve tokens, and {GuestCount} guest tokens.",
                 refreshDeleted,
-                revokedDeleted);
+                revokedDeleted,
+                tenantResolveDeleted,
+                guestDeleted);
         }
     }
 }

@@ -165,12 +165,18 @@ builder.Services.AddOptions<ReservationPolicyOptions>()
         "Reservations:Policy:LeadTimeMinutes must be 0 or greater.")
     .Validate(options => options.MaxAdvanceDays >= 1,
         "Reservations:Policy:MaxAdvanceDays must be 1 or greater.")
-    .Validate(options => options.MaxDurationMinutes >= 15,
-        "Reservations:Policy:MaxDurationMinutes must be at least 15.")
+    .Validate(options => options.SlotMinutes >= 15,
+        "Reservations:Policy:SlotMinutes must be at least 15.")
+    .Validate(options => options.MaxDurationMinutes >= options.SlotMinutes,
+        "Reservations:Policy:MaxDurationMinutes must be greater than or equal to SlotMinutes.")
     .Validate(options => options.BufferMinutes >= 0,
         "Reservations:Policy:BufferMinutes must be 0 or greater.")
     .Validate(options => options.PendingExpiryHours >= 1,
         "Reservations:Policy:PendingExpiryHours must be 1 or greater.")
+    .Validate(options => options.MaxPendingPerUser >= 1,
+        "Reservations:Policy:MaxPendingPerUser must be at least 1.")
+    .Validate(options => options.GuestAccessHours >= 1,
+        "Reservations:Policy:GuestAccessHours must be at least 1.")
     .ValidateOnStart();
 
 builder.Services
@@ -238,10 +244,19 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
 
                 if (string.IsNullOrWhiteSpace(orgIdValue) ||
                     string.IsNullOrWhiteSpace(orgRoleValue) ||
-                    !Guid.TryParse(orgIdValue, out var organizationId) ||
+                    !Guid.TryParse(orgIdValue, out var organizationId) ||       
                     !Enum.TryParse<OrganizationMemberRole>(orgRoleValue, true, out _))
                 {
                     context.Fail("Invalid token claims.");
+                    return;
+                }
+
+                var currentTenant = context.HttpContext.RequestServices
+                    .GetRequiredService<ICurrentTenant>();
+                if (currentTenant.OrganizationId.HasValue &&
+                    currentTenant.OrganizationId.Value != organizationId)
+                {
+                    context.Fail("Tenant mismatch.");
                     return;
                 }
 

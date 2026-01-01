@@ -26,6 +26,9 @@ jobs:
       - name: Build with dotnet
         run: dotnet build --configuration Release
 
+      - name: Run integration tests
+        run: dotnet test tests/eduHub.IntegrationTests/eduHub.IntegrationTests.csproj --configuration Release
+
       - name: dotnet publish
         run: dotnet publish -c Release -o ${{env.DOTNET_ROOT}}/myapp
 

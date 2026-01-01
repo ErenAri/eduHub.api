@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using eduHub.Application.DTOs.Reservations;
 using eduHub.Application.DTOs.Users;
+using eduHub.Application.Options;
 using eduHub.Application.Security;
 using eduHub.Domain.Entities;
 using eduHub.Domain.Enums;
@@ -53,25 +54,52 @@ public class ServiceIntegrationTests : IAsyncLifetime
 
             await AddMembershipAsync(context, tenant, org.Id, registered.Id, OrganizationMemberRole.User);
 
-            var auth = await userService.LoginAsync(new UserLoginDto
+            tenant.SetTenant(org.Id);
+            AuthResponseDto? auth;
+            try
             {
-                UserNameOrEmail = registered.UserName,
-                Password = password
-            }, org.Id);
+                auth = await userService.LoginAsync(new UserLoginDto
+                {
+                    UserNameOrEmail = registered.UserName,
+                    Password = password
+                }, org.Id);
+            }
+            finally
+            {
+                tenant.Clear();
+            }
 
             Assert.NotNull(auth);
 
-            var refreshed = await userService.RefreshAsync(new RefreshRequestDto
+            tenant.SetTenant(org.Id);
+            AuthResponseDto? refreshed;
+            try
             {
-                RefreshToken = auth!.RefreshToken
-            }, org.Id);
+                refreshed = await userService.RefreshAsync(new RefreshRequestDto
+                {
+                    RefreshToken = auth!.RefreshToken
+                }, org.Id);
+            }
+            finally
+            {
+                tenant.Clear();
+            }
 
             Assert.NotNull(refreshed);
 
-            var reused = await userService.RefreshAsync(new RefreshRequestDto
+            tenant.SetTenant(org.Id);
+            AuthResponseDto? reused;
+            try
             {
-                RefreshToken = auth.RefreshToken
-            }, org.Id);
+                reused = await userService.RefreshAsync(new RefreshRequestDto
+                {
+                    RefreshToken = auth.RefreshToken
+                }, org.Id);
+            }
+            finally
+            {
+                tenant.Clear();
+            }
 
             Assert.Null(reused);
 
@@ -104,11 +132,20 @@ public class ServiceIntegrationTests : IAsyncLifetime
 
             await AddMembershipAsync(context, tenant, org.Id, registered.Id, OrganizationMemberRole.User);
 
-            var auth = await userService.LoginAsync(new UserLoginDto
+            tenant.SetTenant(org.Id);
+            AuthResponseDto? auth;
+            try
             {
-                UserNameOrEmail = registered.UserName,
-                Password = password
-            }, org.Id);
+                auth = await userService.LoginAsync(new UserLoginDto
+                {
+                    UserNameOrEmail = registered.UserName,
+                    Password = password
+                }, org.Id);
+            }
+            finally
+            {
+                tenant.Clear();
+            }
 
             Assert.NotNull(auth);
 
@@ -143,10 +180,12 @@ public class ServiceIntegrationTests : IAsyncLifetime
                 Purpose = "Test"
             };
 
-            var service = new ReservationService(context);
+            var policyOptions = BuildReservationPolicyOptions();
+            var availabilityService = new AvailabilityService(context, tenant, policyOptions);
+            var service = new ReservationService(context, availabilityService, policyOptions);
 
-            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(dto, user.Id));
-            Assert.Contains("Room does not exist", ex.Message);
+            var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => service.CreateAsync(dto, user.Id));
+            Assert.Contains("Room not found", ex.Message);
         }
     }
 
@@ -187,10 +226,12 @@ public class ServiceIntegrationTests : IAsyncLifetime
                 Purpose = "Test"
             };
 
-            var service = new ReservationService(context);
+            var policyOptions = BuildReservationPolicyOptions();
+            var availabilityService = new AvailabilityService(context, tenant, policyOptions);
+            var service = new ReservationService(context, availabilityService, policyOptions);
 
-            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(dto, user.Id));
-            Assert.Contains("Room does not exist", ex.Message);
+            var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() => service.CreateAsync(dto, user.Id));
+            Assert.Contains("Room not found", ex.Message);
         }
     }
 
@@ -231,7 +272,9 @@ public class ServiceIntegrationTests : IAsyncLifetime
 
             await context.SaveChangesAsync();
 
-            var service = new RoomService(context);
+            var policyOptions = BuildReservationPolicyOptions();
+            var availabilityService = new AvailabilityService(context, tenant, policyOptions);
+            var service = new RoomService(context, availabilityService);
             var available = await service.GetAvailableRoomsAsync(building.Id, start, end);
 
             Assert.Contains(available, r => r.Id == room.Id);
@@ -324,6 +367,11 @@ public class ServiceIntegrationTests : IAsyncLifetime
         };
 
         return Options.Create(options);
+    }
+
+    private static IOptions<ReservationPolicyOptions> BuildReservationPolicyOptions()
+    {
+        return Options.Create(new ReservationPolicyOptions());
     }
 
     private static User CreateUser(string prefix)

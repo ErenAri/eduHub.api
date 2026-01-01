@@ -9,6 +9,12 @@ eduHub API is an ASP.NET Core Web API for managing buildings, rooms, reservation
 - src/eduHub.Infrastructure/ - persistence, EF Core, services, migrations.
 - tests/ - integration tests.
 
+## Docs
+- docs/Operations.md
+- docs/qa-plan-release-checklist.md
+- docs/auth-contract.md
+- docs/tenant-resolve-durability.md
+
 ## Security and policy
 - JWT bearer validation enforces issuer, audience, lifetime, and key length; tokens are checked against user existence and revoked token state.
 - Authorization fallback requires authenticated users; admin endpoints require the AdminOnly policy.

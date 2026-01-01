@@ -15,6 +15,7 @@ public class Reservation : ITenantScoped
     public ReservationStatus Status { get; set; }
     public int? CreatedByUserId { get; set; }
     public User? CreatedByUser { get; set; }
+    public string? GuestEmail { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset? ExpiresAtUtc { get; set; }
     public bool IsDeleted { get; set; }

@@ -321,7 +321,10 @@ public class AvailabilityService : IAvailabilityService
         if (startTimeUtc >= endTimeUtc)
             throw new InvalidOperationException("End time must be after start time.");
 
-        var durationMinutes = (endTimeUtc - startTimeUtc).TotalMinutes;
+        var durationMinutes = Math.Round((endTimeUtc - startTimeUtc).TotalMinutes);
+        if (_policy.SlotMinutes > 0 && durationMinutes != _policy.SlotMinutes)
+            throw new InvalidOperationException("Reservation must match the slot length.");
+
         if (durationMinutes > _policy.MaxDurationMinutes)
             throw new InvalidOperationException("Reservation exceeds the maximum duration.");
 
@@ -472,7 +475,6 @@ public class AvailabilityService : IAvailabilityService
         DateTimeOffset endTimeUtc,
         int? excludeReservationId)
     {
-        var now = DateTimeOffset.UtcNow;
         var bufferStart = startTimeUtc.AddMinutes(-_policy.BufferMinutes);
         var bufferEnd = endTimeUtc.AddMinutes(_policy.BufferMinutes);
 
@@ -480,10 +482,7 @@ public class AvailabilityService : IAvailabilityService
             .AsNoTracking()
             .Where(r => r.RoomId == roomId)
             .Where(r => r.StartTimeUtc < bufferEnd && r.EndTimeUtc > bufferStart)
-            .Where(r =>
-                r.Status == ReservationStatus.Approved ||
-                (r.Status == ReservationStatus.Pending &&
-                 (r.ExpiresAtUtc == null || r.ExpiresAtUtc > now)));
+            .Where(r => r.Status == ReservationStatus.Approved);
 
         if (excludeReservationId.HasValue)
             query = query.Where(r => r.Id != excludeReservationId.Value);
@@ -662,15 +661,11 @@ public class AvailabilityService : IAvailabilityService
             blocks.Add(new TimeRange(blackout.StartTimeUtc, blackout.EndTimeUtc));
         }
 
-        var now = DateTimeOffset.UtcNow;
         var reservationQuery = _context.Reservations
             .AsNoTracking()
             .Where(r => r.RoomId == roomId)
             .Where(r => r.StartTimeUtc < rangeEndUtc && r.EndTimeUtc > rangeStartUtc)
-            .Where(r =>
-                r.Status == ReservationStatus.Approved ||
-                (r.Status == ReservationStatus.Pending &&
-                 (r.ExpiresAtUtc == null || r.ExpiresAtUtc > now)));
+            .Where(r => r.Status == ReservationStatus.Approved);
 
         if (excludeReservationId.HasValue)
             reservationQuery = reservationQuery.Where(r => r.Id != excludeReservationId.Value);

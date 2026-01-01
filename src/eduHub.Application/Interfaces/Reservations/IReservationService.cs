@@ -13,6 +13,9 @@ public interface IReservationService
     Task<ReservationResponseDto> CreateAsync(
         ReservationCreateDto dto,
         int createdByUserId);
+    Task<ReservationResponseDto> CreateGuestAsync(
+        ReservationCreateDto dto,
+        string guestEmail);
     Task<ReservationResponseDto> UpdateAsync(
         int id,
         ReservationUpdateDto dto,
