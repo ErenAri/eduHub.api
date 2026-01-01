@@ -482,20 +482,27 @@ using (var scope = app.Services.CreateScope())
     if (adminSeedingEnabled && !env.IsDevelopment())
         throw new InvalidOperationException("Admin seeding is only supported in Development.");
 
-    if (env.IsDevelopment())
+    var autoMigrate = configuration.GetValue("Startup:AutoMigrate", env.IsDevelopment());
+    if (autoMigrate)
     {
-        var autoMigrate = configuration.GetValue("Startup:AutoMigrate", env.IsDevelopment());
-        if (autoMigrate)
+        var allowProductionMigrations = configuration.GetValue("Startup:AllowProductionMigrations", false);
+        if (!env.IsDevelopment() && !allowProductionMigrations)
         {
-            await db.Database.MigrateAsync();
+            throw new InvalidOperationException(
+                "Auto-migrate outside Development requires Startup:AllowProductionMigrations=true.");
         }
 
-        var seedEnabled = configuration.GetValue("Seed:Enabled", env.IsDevelopment());
-    if (seedEnabled)
-    {
-        var tenantSetter = services.GetRequiredService<ICurrentTenantSetter>();
-        await DbInitializer.SeedAsync(db, configuration, env, tenantSetter);
+        await db.Database.MigrateAsync();
     }
+
+    if (env.IsDevelopment())
+    {
+        var seedEnabled = configuration.GetValue("Seed:Enabled", env.IsDevelopment());
+        if (seedEnabled)
+        {
+            var tenantSetter = services.GetRequiredService<ICurrentTenantSetter>();
+            await DbInitializer.SeedAsync(db, configuration, env, tenantSetter);
+        }
     }
 }
 

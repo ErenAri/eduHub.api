@@ -34,6 +34,12 @@ param deployFrontDoor bool = false
 @description('ASP.NET Core environment.')
 param environmentName string = 'Production'
 
+@description('Enable automatic database migrations on startup.')
+param startupAutoMigrate bool = false
+
+@description('Allow automatic migrations in non-development environments.')
+param startupAllowProductionMigrations bool = false
+
 @description('JWT signing key (32+ bytes).')
 @secure()
 param jwtKey string
@@ -127,7 +133,11 @@ var baseAppSettings = [
   }
   {
     name: 'Startup__AutoMigrate'
-    value: 'false'
+    value: startupAutoMigrate ? 'true' : 'false'
+  }
+  {
+    name: 'Startup__AllowProductionMigrations'
+    value: startupAllowProductionMigrations ? 'true' : 'false'
   }
   {
     name: 'ForwardedHeaders__TrustAll'
