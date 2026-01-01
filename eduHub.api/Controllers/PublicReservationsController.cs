@@ -163,6 +163,28 @@ public class PublicReservationsController : ApiControllerBase
         return Ok(new ReservationPendingCountResponseDto { PendingCount = count });
     }
 
+    [HttpGet("policy")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ReservationPolicyDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public ActionResult<ReservationPolicyDto> GetPolicy()
+    {
+        if (!_tenant.OrganizationId.HasValue)
+            return NotFoundProblem("Tenant not found.");
+
+        return Ok(new ReservationPolicyDto
+        {
+            LeadTimeMinutes = _policy.LeadTimeMinutes,
+            MaxAdvanceDays = _policy.MaxAdvanceDays,
+            SlotMinutes = _policy.SlotMinutes,
+            MaxDurationMinutes = _policy.MaxDurationMinutes,
+            BufferMinutes = _policy.BufferMinutes,
+            PendingExpiryHours = _policy.PendingExpiryHours,
+            MaxPendingPerUser = _policy.MaxPendingPerUser,
+            GuestAccessHours = _policy.GuestAccessHours
+        });
+    }
+
     [HttpGet("pending-count")]
     [ProducesResponseType(typeof(ReservationPendingCountResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
