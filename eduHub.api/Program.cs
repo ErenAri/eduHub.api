@@ -506,9 +506,9 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// =======================================
+// ======================================
 // Middleware Pipeline
-// =======================================
+// ======================================
 
 app.UseForwardedHeaders();
 app.UseMiddleware<CorrelationIdMiddleware>();
