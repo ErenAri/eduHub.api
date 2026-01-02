@@ -109,6 +109,30 @@ public class PlatformOrganizationsController : ApiControllerBase
         return Ok(ToResponse(updated));
     }
 
+    [HttpPatch("{id:guid}/slug")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<OrganizationResponseDto>> UpdateSlug(
+        Guid id,
+        [FromBody] OrganizationSlugUpdateDto dto)
+    {
+        var slug = dto.Slug?.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(slug))
+            return BadRequestProblem("Organization ID is required.");
+
+        if (!IsValidSlug(slug))
+            return BadRequestProblem("Organization ID must be 8 characters of lowercase letters and numbers.");
+
+        var existing = await _organizationService.GetBySlugAsync(slug);
+        if (existing != null && existing.Id != id)
+            return ConflictProblem("Organization ID already exists.");
+
+        var updated = await _organizationService.UpdateSlugAsync(id, slug);
+        return Ok(ToResponse(updated));
+    }
+
     private static OrganizationResponseDto ToResponse(Organization org)
     {
         return new OrganizationResponseDto

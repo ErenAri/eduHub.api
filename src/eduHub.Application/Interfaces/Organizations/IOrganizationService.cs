@@ -12,4 +12,5 @@ public interface IOrganizationService
     Task<Organization> CreateAsync(Organization organization);
     Task<Organization> UpdateStatusAsync(Guid id, bool isActive);
     Task<Organization> UpdatePlanAsync(Guid id, string subscriptionPlan);
+    Task<Organization> UpdateSlugAsync(Guid id, string slug);
 }

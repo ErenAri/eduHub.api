@@ -1,3 +1,4 @@
+using eduHub.Application.Common.Exceptions;
 using eduHub.Application.Interfaces.Organizations;
 using eduHub.Domain.Entities;
 using eduHub.Infrastructure.Persistence;
@@ -92,6 +93,26 @@ public class OrganizationService : IOrganizationService
             throw new KeyNotFoundException("Organization not found.");
 
         organization.SubscriptionPlan = subscriptionPlan;
+        await _context.SaveChangesAsync();
+        return organization;
+    }
+
+    public async Task<Organization> UpdateSlugAsync(Guid id, string slug)
+    {
+        var organization = await _context.Organizations.FirstOrDefaultAsync(o => o.Id == id);
+        if (organization == null)
+            throw new KeyNotFoundException("Organization not found.");
+
+        var normalized = slug.Trim().ToLowerInvariant();
+        if (organization.Slug == normalized)
+            return organization;
+
+        var exists = await _context.Organizations
+            .AnyAsync(o => o.Slug == normalized && o.Id != id);
+        if (exists)
+            throw new ConflictException("Organization ID already exists.");
+
+        organization.Slug = normalized;
         await _context.SaveChangesAsync();
         return organization;
     }
