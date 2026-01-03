@@ -13,6 +13,7 @@ using FluentValidation;
 using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
@@ -40,9 +41,10 @@ using IPNetwork = Microsoft.AspNetCore.HttpOverrides.IPNetwork;
 var builder = WebApplication.CreateBuilder(args);
 
 var corsPolicyName = "CorsPolicy";
-var allowedCorsOrigins = builder.Configuration
+var rawCorsOrigins = builder.Configuration
     .GetSection("Cors:AllowedOrigins")
     .Get<string[]>() ?? Array.Empty<string>();
+var allowedCorsOrigins = NormalizeCorsOrigins(rawCorsOrigins, builder.Environment.IsDevelopment());
 
 if (builder.Environment.IsProduction() && allowedCorsOrigins.Length == 0)
     throw new InvalidOperationException("Configure Cors:AllowedOrigins for production environments.");
@@ -60,6 +62,7 @@ builder.Services.AddCors(options =>
         else
         {
             policy.WithOrigins(allowedCorsOrigins)
+                  .SetIsOriginAllowedToAllowWildcardSubdomains()
                   .AllowAnyHeader()
                   .AllowAnyMethod();
         }
@@ -470,6 +473,50 @@ builder.Services.AddHostedService<TokenCleanupService>();
 static string GetClientIp(HttpContext context)
 {
     return context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+}
+
+static string[] NormalizeCorsOrigins(IEnumerable<string> origins, bool allowHttpWildcard)
+{
+    var normalized = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    foreach (var origin in origins ?? Array.Empty<string>())
+    {
+        if (string.IsNullOrWhiteSpace(origin))
+            continue;
+
+        var trimmed = origin.Trim().TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(trimmed))
+            continue;
+
+        if (!trimmed.Contains("://", StringComparison.Ordinal))
+        {
+            AddWildcardOrigin(normalized, "https", trimmed);
+            if (allowHttpWildcard)
+                AddWildcardOrigin(normalized, "http", trimmed);
+            continue;
+        }
+
+        normalized.Add(trimmed);
+    }
+
+    return normalized.ToArray();
+}
+
+static void AddWildcardOrigin(ISet<string> destinations, string scheme, string host)
+{
+    var normalizedHost = host.Trim().TrimEnd('.');
+    if (string.IsNullOrWhiteSpace(normalizedHost))
+        return;
+
+    if (normalizedHost.StartsWith("*."))
+    {
+        destinations.Add($"{scheme}://{normalizedHost}");
+        destinations.Add($"{scheme}://{normalizedHost[2..]}");
+        return;
+    }
+
+    destinations.Add($"{scheme}://{normalizedHost}");
+    destinations.Add($"{scheme}://*.{normalizedHost}");
 }
 
 static string GetRateLimitPartition(HttpContext context)

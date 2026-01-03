@@ -15,7 +15,7 @@ public sealed class TenantResolutionMiddleware
     private readonly RequestDelegate _next;
     private readonly ProblemDetailsFactory _problemDetailsFactory;
     private readonly ILogger<TenantResolutionMiddleware> _logger;
-    private static readonly string[] ReservedSubdomains = { "www" };
+    private static readonly string[] ReservedSubdomains = { "www", "api" };
 
     public TenantResolutionMiddleware(
         RequestDelegate next,
@@ -87,7 +87,31 @@ public sealed class TenantResolutionMiddleware
         if (!string.IsNullOrWhiteSpace(forwardedSlug))
             return forwardedSlug;
 
+        var originalHost = context.Request.Headers["x-original-host"].FirstOrDefault();
+        var originalSlug = ExtractSubdomain(originalHost);
+        if (!string.IsNullOrWhiteSpace(originalSlug))
+            return originalSlug;
+
+        var originSlug = ExtractSubdomainFromOrigin(context.Request.Headers["origin"].FirstOrDefault());
+        if (!string.IsNullOrWhiteSpace(originSlug))
+            return originSlug;
+
+        var refererSlug = ExtractSubdomainFromOrigin(context.Request.Headers["referer"].FirstOrDefault());
+        if (!string.IsNullOrWhiteSpace(refererSlug))
+            return refererSlug;
+
         return ExtractSubdomain(context.Request.Host.Host);
+    }
+
+    private static string? ExtractSubdomainFromOrigin(string? origin)
+    {
+        if (string.IsNullOrWhiteSpace(origin))
+            return null;
+
+        if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+            return null;
+
+        return ExtractSubdomain(uri.Host);
     }
 
     private static string? ExtractSubdomain(string? host)
@@ -95,7 +119,13 @@ public sealed class TenantResolutionMiddleware
         if (string.IsNullOrWhiteSpace(host))
             return null;
 
-        var hostname = host.Split(':')[0].Trim().ToLowerInvariant();
+        var hostname = host
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(hostname))
+            return null;
+
+        hostname = hostname.Split(':')[0].Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(hostname))
             return null;
 
@@ -131,15 +161,21 @@ public sealed class TenantResolutionMiddleware
     private async Task WriteTenantNotFoundAsync(HttpContext context)
     {
         var headerSlug = context.Request.Headers["x-tenant-slug"].FirstOrDefault();
+        var origin = context.Request.Headers["origin"].FirstOrDefault();
+        var referer = context.Request.Headers["referer"].FirstOrDefault();
         var forwardedHost = context.Request.Headers["x-forwarded-host"].FirstOrDefault();
+        var originalHost = context.Request.Headers["x-original-host"].FirstOrDefault();
         var cookieSlug = context.Request.Cookies["orgSlug"];
         var host = context.Request.Host.HasValue ? context.Request.Host.Value : null;
 
         _logger.LogWarning(
-            "Tenant not found. Path: {Path}, Host: {Host}, ForwardedHost: {ForwardedHost}, HeaderSlug: {HeaderSlug}, CookieSlug: {CookieSlug}",
+            "Tenant not found. Path: {Path}, Host: {Host}, ForwardedHost: {ForwardedHost}, OriginalHost: {OriginalHost}, Origin: {Origin}, Referer: {Referer}, HeaderSlug: {HeaderSlug}, CookieSlug: {CookieSlug}",
             context.Request.Path.Value,
             host,
             forwardedHost,
+            originalHost,
+            origin,
+            referer,
             headerSlug,
             cookieSlug);
 
