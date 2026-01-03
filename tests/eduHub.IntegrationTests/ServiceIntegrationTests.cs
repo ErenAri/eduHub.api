@@ -258,7 +258,7 @@ public class ServiceIntegrationTests : IAsyncLifetime
             context.Rooms.Add(room);
             await context.SaveChangesAsync();
 
-            var start = DateTimeOffset.UtcNow.AddDays(1);
+            var start = DateTimeOffset.UtcNow.Date.AddDays(1).AddHours(10);
             var end = start.AddHours(1);
             context.Reservations.Add(new Reservation
             {
