@@ -2,6 +2,7 @@ using eduHub.api.Authorization;
 using eduHub.api.HostedServices;
 using eduHub.api.Middleware;
 using eduHub.api.Options;
+using eduHub.api.Services;
 using eduHub.Application.Interfaces.Tenants;
 using eduHub.Application.Options;
 using eduHub.Application.Validators.Users;
@@ -71,6 +72,8 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddControllers();
 builder.Services.AddMemoryCache();
+builder.Services.AddHttpClient();
+builder.Services.AddScoped<IContactEmailSender, ResendContactEmailSender>();
 
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<UserRegisterDtoValidator>();
@@ -158,6 +161,9 @@ builder.Services.AddOptions<JwtOptions>()
     .Validate(options => options.RefreshTokenDays is >= 1 and <= 90,
         "Jwt:RefreshTokenDays must be between 1 and 90.")
     .ValidateOnStart();
+
+builder.Services.AddOptions<ResendOptions>()
+    .Bind(builder.Configuration.GetSection(ResendOptions.SectionName));
 
 builder.Services.AddOptions<ReservationPolicyOptions>()
     .Bind(builder.Configuration.GetSection(ReservationPolicyOptions.SectionName))
@@ -372,6 +378,18 @@ builder.Services.AddRateLimiter(options =>
         return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
         {
             Window = TimeSpan.FromMinutes(1),
+            PermitLimit = 5,
+            QueueLimit = 0,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+        });
+    });
+
+    options.AddPolicy("public-contact", httpContext =>
+    {
+        var ip = GetClientIp(httpContext);
+        return RateLimitPartition.GetFixedWindowLimiter($"ip:{ip}", _ => new FixedWindowRateLimiterOptions
+        {
+            Window = TimeSpan.FromMinutes(10),
             PermitLimit = 5,
             QueueLimit = 0,
             QueueProcessingOrder = QueueProcessingOrder.OldestFirst
