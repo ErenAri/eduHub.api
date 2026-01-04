@@ -21,6 +21,47 @@ public class AuthController : ApiControllerBase
         _context = context;
     }
 
+    [HttpPost("login")]
+    [AllowAnonymous]
+    [EnableRateLimiting("auth")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<AuthResponseDto>> Login([FromBody] UserLoginDto dto)
+    {
+        var headerSlug = Request.Headers["x-tenant-slug"].FirstOrDefault()?.Trim().ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(headerSlug))
+        {
+            var organization = await _context.Organizations
+                .AsNoTracking()
+                .FirstOrDefaultAsync(o => o.Slug == headerSlug);
+            if (organization == null || !organization.IsActive)
+                return NotFoundProblem("Tenant not found.");
+
+            var auth = await _userService.LoginAsync(dto, organization.Id);
+            if (auth == null)
+                return BadRequestProblem("Invalid credentials.", "InvalidCredentials");
+
+            auth.OrganizationSlug = organization.Slug;
+            return Ok(auth);
+        }
+
+        var resolved = await _userService.LoginWithResolvedTenantAsync(dto);
+        if (resolved.Auth == null)
+        {
+            if (resolved.HasMultipleOrganizations)
+            {
+                return ConflictProblem(
+                    "Multiple organizations found. Use your organization URL.",
+                    "MultipleOrganizations");
+            }
+
+            return BadRequestProblem("Invalid credentials.", "InvalidCredentials");
+        }
+
+        return Ok(resolved.Auth);
+    }
+
     [HttpPost("register")]
     [AllowAnonymous]
     [EnableRateLimiting("auth")]

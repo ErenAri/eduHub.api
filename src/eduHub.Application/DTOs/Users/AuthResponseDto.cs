@@ -1,4 +1,4 @@
-﻿namespace eduHub.Application.DTOs.Users;
+namespace eduHub.Application.DTOs.Users;
 
 public class AuthResponseDto
 {
@@ -8,4 +8,5 @@ public class AuthResponseDto
     public DateTimeOffset RefreshTokenExpiresAtUtc { get; set; }
 
     public UserResponseDto User { get; set; } = null!;
+    public string? OrganizationSlug { get; set; }
 }

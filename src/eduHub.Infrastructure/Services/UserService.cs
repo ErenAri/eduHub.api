@@ -199,6 +199,50 @@ public class UserService : IUserService
         return await IssueTokensAsync(user, organizationId, membership.Role);
     }
 
+    public async Task<ResolvedTenantLoginResult> LoginWithResolvedTenantAsync(UserLoginDto dto)
+    {
+        var user = await _context.Users
+            .FirstOrDefaultAsync(u =>
+                u.UserName == dto.UserNameOrEmail ||
+                u.Email == dto.UserNameOrEmail);
+
+        if (user == null)
+        {
+            _ = BCrypt.Net.BCrypt.Verify(dto.Password, DummyPasswordHash);
+            return new ResolvedTenantLoginResult();
+        }
+
+        var valid = BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash);
+        if (!valid)
+            return new ResolvedTenantLoginResult();
+
+        var memberships = await _context.OrganizationMembers
+            .AsNoTracking()
+            .Where(m => m.UserId == user.Id && m.Status == OrganizationMemberStatus.Active)
+            .Join(
+                _context.Organizations.AsNoTracking().Where(o => o.IsActive),
+                member => member.OrganizationId,
+                organization => organization.Id,
+                (member, organization) => new
+                {
+                    member.OrganizationId,
+                    member.Role,
+                    organization.Slug
+                })
+            .ToListAsync();
+
+        if (memberships.Count == 0)
+            return new ResolvedTenantLoginResult();
+
+        if (memberships.Count > 1)
+            return new ResolvedTenantLoginResult { HasMultipleOrganizations = true };
+
+        var membership = memberships[0];
+        var auth = await IssueTokensAsync(user, membership.OrganizationId, membership.Role);
+        auth.OrganizationSlug = membership.Slug;
+        return new ResolvedTenantLoginResult { Auth = auth };
+    }
+
     public async Task<AuthResponseDto?> RefreshPlatformAsync(RefreshRequestDto dto)
     {
         if (string.IsNullOrWhiteSpace(dto.RefreshToken))
