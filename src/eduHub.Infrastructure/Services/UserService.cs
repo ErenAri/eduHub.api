@@ -131,6 +131,26 @@ public class UserService : IUserService
         return await IssueTokensAsync(user, organizationId, OrganizationMemberRole.User);
     }
 
+    public async Task<AuthResponseDto?> LoginUserAsync(UserLoginDto dto)
+    {
+        var user = await _context.Users
+            .FirstOrDefaultAsync(u =>
+                u.UserName == dto.UserNameOrEmail ||
+                u.Email == dto.UserNameOrEmail);
+
+        if (user == null)
+        {
+            _ = BCrypt.Net.BCrypt.Verify(dto.Password, DummyPasswordHash);
+            return null;
+        }
+
+        var valid = BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash);
+        if (!valid)
+            return null;
+
+        return await IssueUserTokensAsync(user);
+    }
+
     public async Task<AuthResponseDto?> LoginPlatformAsync(UserLoginDto dto)
     {
         var user = await _context.Users
@@ -179,21 +199,7 @@ public class UserService : IUserService
                 m.OrganizationId == organizationId &&
                 m.UserId == user.Id);
 
-        if (membership == null)
-        {
-            membership = new OrganizationMember
-            {
-                OrganizationId = organizationId,
-                UserId = user.Id,
-                Role = OrganizationMemberRole.User,
-                Status = OrganizationMemberStatus.Active,
-                JoinedAtUtc = DateTimeOffset.UtcNow
-            };
-            _context.OrganizationMembers.Add(membership);
-            await _context.SaveChangesAsync();
-        }
-
-        if (membership.Status != OrganizationMemberStatus.Active)
+        if (membership == null || membership.Status != OrganizationMemberStatus.Active)
             return null;
 
         return await IssueTokensAsync(user, organizationId, membership.Role);
@@ -241,6 +247,38 @@ public class UserService : IUserService
         var auth = await IssueTokensAsync(user, membership.OrganizationId, membership.Role);
         auth.OrganizationSlug = membership.Slug;
         return new ResolvedTenantLoginResult { Auth = auth };
+    }
+
+    public async Task<AuthResponseDto?> RefreshUserAsync(RefreshRequestDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.RefreshToken))
+            return null;
+
+        var now = DateTimeOffset.UtcNow;
+        var refreshHash = HashToken(dto.RefreshToken);
+
+        var storedToken = await _context.RefreshTokens
+            .FirstOrDefaultAsync(rt => rt.TokenHash == refreshHash);
+
+        if (storedToken == null)
+            return null;
+
+        if (storedToken.RevokedAtUtc != null)
+        {
+            await RevokeRefreshTokensAsync(storedToken.UserId, now);
+            return null;
+        }
+
+        if (storedToken.ExpiresAtUtc <= now)
+            return null;
+
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == storedToken.UserId);
+        if (user == null)
+            return null;
+
+        storedToken.RevokedAtUtc = now;
+
+        return await IssueUserTokensAsync(user, now);
     }
 
     public async Task<AuthResponseDto?> RefreshPlatformAsync(RefreshRequestDto dto)
@@ -675,6 +713,45 @@ public class UserService : IUserService
         return RevokeRefreshTokensAsync(userId, DateTimeOffset.UtcNow);
     }
 
+    private async Task<AuthResponseDto> IssueUserTokensAsync(
+        User user,
+        DateTimeOffset? nowOverride = null)
+    {
+        var accessToken = GenerateUserJwtToken(user, out var expiresAtUtc, out _);
+
+        var now = nowOverride ?? DateTimeOffset.UtcNow;
+        var refreshDays = _jwtOptions.RefreshTokenDays;
+
+        var refreshToken = GenerateSecureToken();
+        var refreshTokenHash = HashToken(refreshToken);
+        var refreshExpiresAtUtc = now.AddDays(refreshDays);
+
+        var staleTokens = await _context.RefreshTokens
+            .Where(rt => rt.UserId == user.Id && (rt.ExpiresAtUtc <= now || rt.RevokedAtUtc != null))
+            .ToListAsync();
+        if (staleTokens.Count > 0)
+            _context.RefreshTokens.RemoveRange(staleTokens);
+
+        _context.RefreshTokens.Add(new RefreshToken
+        {
+            UserId = user.Id,
+            TokenHash = refreshTokenHash,
+            CreatedAtUtc = now,
+            ExpiresAtUtc = refreshExpiresAtUtc
+        });
+
+        await _context.SaveChangesAsync();
+
+        return new AuthResponseDto
+        {
+            AccessToken = accessToken,
+            ExpiresAtUtc = expiresAtUtc,
+            RefreshToken = refreshToken,
+            RefreshTokenExpiresAtUtc = refreshExpiresAtUtc,
+            User = MapUser(user)
+        };
+    }
+
     private async Task<AuthResponseDto> IssueTokensAsync(
         User user,
         Guid organizationId,
@@ -827,6 +904,45 @@ public class UserService : IUserService
 
         if (user.Role == UserRole.Admin)
             claims.Add(new Claim(TenantClaimTypes.IsPlatformAdmin, "true"));
+
+        var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
+        var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
+
+        var minutes = _jwtOptions.AccessTokenMinutes;
+        var now = DateTimeOffset.UtcNow;
+        expiresAtUtc = now.AddMinutes(minutes);
+
+        var token = new JwtSecurityToken(
+            issuer: issuer,
+            audience: audience,
+            claims: claims,
+            notBefore: now.UtcDateTime,
+            expires: expiresAtUtc.UtcDateTime,
+            signingCredentials: credentials);
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    private string GenerateUserJwtToken(
+        User user,
+        out DateTimeOffset expiresAtUtc,
+        out string jti)
+    {
+        var key = _jwtOptions.Key;
+        var issuer = _jwtOptions.Issuer;
+        var audience = _jwtOptions.Audience;
+
+        jti = Guid.NewGuid().ToString("N");
+        var claims = new List<Claim>
+        {
+            new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+            new(JwtRegisteredClaimNames.Jti, jti),
+            new(JwtRegisteredClaimNames.UniqueName, user.UserName),
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new(ClaimTypes.Name, user.UserName),
+            new(ClaimTypes.Role, user.Role.ToString()),
+            new(TenantClaimTypes.IsUser, "true")
+        };
 
         var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
         var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);

@@ -224,6 +224,7 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
                 var orgIdValue = context.Principal?.FindFirstValue(TenantClaimTypes.OrganizationId);
                 var orgRoleValue = context.Principal?.FindFirstValue(TenantClaimTypes.OrganizationRole);
                 var platformClaim = context.Principal?.FindFirstValue(TenantClaimTypes.IsPlatformAdmin);
+                var userScopeClaim = context.Principal?.FindFirstValue(TenantClaimTypes.IsUser);
 
                 if (string.IsNullOrWhiteSpace(userIdValue) ||
                     string.IsNullOrWhiteSpace(jti) ||
@@ -251,9 +252,14 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
                     return;
                 }
 
+                if (string.Equals(userScopeClaim, "true", StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
                 if (string.IsNullOrWhiteSpace(orgIdValue) ||
                     string.IsNullOrWhiteSpace(orgRoleValue) ||
-                    !Guid.TryParse(orgIdValue, out var organizationId) ||       
+                    !Guid.TryParse(orgIdValue, out var organizationId) ||
                     !Enum.TryParse<OrganizationMemberRole>(orgRoleValue, true, out _))
                 {
                     context.Fail("Invalid token claims.");

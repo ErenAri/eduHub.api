@@ -5,4 +5,5 @@ public static class TenantClaimTypes
     public const string OrganizationId = "org_id";
     public const string OrganizationRole = "org_role";
     public const string IsPlatformAdmin = "is_platform_admin";
+    public const string IsUser = "is_user";
 }

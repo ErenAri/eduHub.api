@@ -32,6 +32,21 @@ public sealed class OrgRoleHandler : AuthorizationHandler<OrgRoleRequirement>
             return Task.CompletedTask;
         }
 
+        var userScopeClaim = context.User.FindFirst(TenantClaimTypes.IsUser)?.Value;
+        if (string.Equals(userScopeClaim, "true", StringComparison.OrdinalIgnoreCase))
+        {
+            if (_tenant.IsPlatformScope || !_tenant.OrganizationId.HasValue)
+                return Task.CompletedTask;
+
+            if (requirement.AllowedRoles.Count == 0 ||
+                requirement.AllowedRoles.Contains(OrganizationMemberRole.User))
+            {
+                context.Succeed(requirement);
+            }
+
+            return Task.CompletedTask;
+        }
+
         if (_tenant.IsPlatformScope || !_tenant.OrganizationId.HasValue)
             return Task.CompletedTask;
 

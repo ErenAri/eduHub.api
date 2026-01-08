@@ -7,9 +7,11 @@ public interface IUserService
 {
     Task<UserResponseDto> RegisterAsync(UserRegisterDto dto);
     Task<AuthResponseDto> RegisterInOrganizationAsync(UserRegisterDto dto, Guid organizationId);
+    Task<AuthResponseDto?> LoginUserAsync(UserLoginDto dto);
     Task<AuthResponseDto?> LoginAsync(UserLoginDto dto, Guid organizationId);
     Task<ResolvedTenantLoginResult> LoginWithResolvedTenantAsync(UserLoginDto dto);
     Task<AuthResponseDto?> LoginPlatformAsync(UserLoginDto dto);
+    Task<AuthResponseDto?> RefreshUserAsync(RefreshRequestDto dto);
     Task<AuthResponseDto?> RefreshAsync(RefreshRequestDto dto, Guid organizationId);
     Task<AuthResponseDto?> RefreshPlatformAsync(RefreshRequestDto dto);
     Task<AuthResponseDto> RedeemInviteAsync(OrganizationInviteRedeemDto dto, Guid organizationId);
